@@ -20,17 +20,17 @@
               placeholder="• • • •"
               class="code-input"
               @input="formatCodeInput"
-              @keyup.enter="checkManualCode"
+              @keyup.enter="findContractor"
               :disabled="isLoading"
               ref="codeInput"
             />
             <button 
-              @click="checkManualCode" 
+              @click="findContractor" 
               class="scan-btn primary" 
               :disabled="isLoading || !isCodeValid"
             >
               <span v-if="isLoading" class="spinner"></span>
-              <span v-else>🔍 Проверить</span>
+              <span v-else>🔍 Найти</span>
             </button>
           </div>
         </div>
@@ -66,73 +66,102 @@
           <p class="camera-hint">Наведите камеру на QR-код</p>
         </div>
         
-        <!-- Результат -->
-        <div v-if="scanResult" class="scan-result" :class="scanResult.success ? 'success' : 'error'">
-          <div class="result-header">
-            <div class="result-icon-wrapper">
-              <span class="result-icon">{{ scanResult.success ? '✅' : '❌' }}</span>
-            </div>
-            <div class="result-title">
-              <h3>{{ scanResult.success ? 'Доступ разрешен!' : 'Доступ запрещен!' }}</h3>
-              <p class="result-message">{{ scanResult.message }}</p>
-            </div>
+        <!-- Карточка подрядчика -->
+        <div v-if="contractorFound" class="contractor-card">
+          <div class="card-header">
+            <span class="card-icon">👤</span>
+            <h3>Информация о подрядчике</h3>
           </div>
           
-          <div v-if="scanResult.contractor" class="contractor-info">
+          <div class="contractor-info">
             <div class="contractor-photo-wrapper" @click="openPhotoModal">
               <div class="contractor-photo">
                 <img 
-                  v-if="scanResult.contractor.photo" 
-                  :src="'http://localhost:8000' + scanResult.contractor.photo" 
-                  :alt="scanResult.contractor.full_name"
+                  v-if="contractorData?.photo" 
+                  :src="'http://localhost:8000' + contractorData.photo" 
+                  :alt="contractorData.full_name"
                   @error="(e) => e.target.style.display = 'none'"
                 />
-                <div v-if="!scanResult.contractor.photo" class="no-photo">👤</div>
+                <div v-if="!contractorData?.photo" class="no-photo">👤</div>
               </div>
               <div class="photo-expand-hint">
                 <span>🔍</span>
-                <span>Нажмите для увеличения</span>
+                <span>Увеличить</span>
               </div>
             </div>
             
             <div class="contractor-details">
               <div class="detail-item">
                 <span class="detail-label">ФИО</span>
-                <span class="detail-value">{{ scanResult.contractor.full_name || 'Не указано' }}</span>
+                <span class="detail-value">{{ contractorData?.full_name || 'Не указано' }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">Телефон</span>
-                <span class="detail-value">{{ scanResult.contractor.phone_number || 'Не указан' }}</span>
+                <span class="detail-value">{{ contractorData?.phone_number || 'Не указан' }}</span>
               </div>
-              <div class="detail-item" v-if="scanResult.contractor.patronymic">
+              <div class="detail-item">
+                <span class="detail-label">Организация</span>
+                <span class="detail-value">{{ contractorData?.organization || 'Не указана' }}</span>
+              </div>
+              <div class="detail-item" v-if="contractorData?.patronymic">
                 <span class="detail-label">Отчество</span>
-                <span class="detail-value">{{ scanResult.contractor.patronymic }}</span>
+                <span class="detail-value">{{ contractorData.patronymic }}</span>
               </div>
-              <div class="detail-item" v-if="scanResult.contractor.is_verified !== undefined">
+              <div class="detail-item">
                 <span class="detail-label">Статус</span>
-                <span class="detail-value" :class="scanResult.contractor.is_verified ? 'verified' : 'unverified'">
-                  {{ scanResult.contractor.is_verified ? '✅ Верифицирован' : '❌ Не верифицирован' }}
+                <span class="detail-value" :class="isOnTerritory ? 'verified' : 'unverified'">
+                  {{ isOnTerritory ? '📍 На территории' : '🚫 Не на территории' }}
                 </span>
               </div>
-              <div class="detail-item" v-if="scanResult.access_method">
-                <span class="detail-label">Способ входа</span>
-                <span class="detail-value">{{ scanResult.access_method === 'qr' ? '📷 QR-код' : '🔑 Код доступа' }}</span>
-              </div>
-              <div class="detail-item" v-if="scanResult.reason">
-                <span class="detail-label">Причина</span>
-                <span class="detail-value error-text">{{ scanResult.reason }}</span>
-              </div>
-              <div class="detail-item" v-if="scanResult.access_time">
-                <span class="detail-label">Время прохода</span>
-                <span class="detail-value">{{ formatTime(scanResult.access_time) }}</span>
+              <div class="detail-item" v-if="daysRemaining !== null">
+                <span class="detail-label">Дней доступа</span>
+                <span class="detail-value" :class="getDaysClass(daysRemaining)">
+                  {{ daysRemaining }}
+                </span>
               </div>
             </div>
           </div>
           
-          <div v-else class="no-contractor">
-            <p>👤 Информация о пользователе не найдена</p>
+          <!-- Кнопки действий -->
+          <div class="action-buttons">
+            <button 
+              class="action-btn entry-btn" 
+              @click="processAccess('entry')"
+              :disabled="isProcessing || isOnTerritory"
+            >
+              🚗 Заехал
+            </button>
+            <button 
+              class="action-btn exit-btn" 
+              @click="processAccess('exit')"
+              :disabled="isProcessing || !isOnTerritory"
+            >
+              🚗 Выехал
+            </button>
           </div>
           
+          <div v-if="actionResult" class="action-result" :class="actionResult.success ? 'success' : 'error'">
+            <span class="result-icon">{{ actionResult.success ? '✅' : '❌' }}</span>
+            <span>{{ actionResult.message }}</span>
+          </div>
+          
+          <button @click="resetScanner" class="scan-btn primary reset-btn">
+            <span>🔄</span>
+            <span>Новый поиск</span>
+          </button>
+        </div>
+        
+        <!-- Результат ошибки -->
+        <div v-if="scanError" class="scan-result error">
+          <div class="result-header">
+            <div class="result-icon-wrapper">
+              <span class="result-icon">❌</span>
+            </div>
+            <div class="result-title">
+              <h3>Доступ запрещен!</h3>
+              <p class="result-message">{{ scanErrorMessage }}</p>
+            </div>
+          </div>
           <button @click="resetScanner" class="scan-btn primary reset-btn">
             <span>🔄</span>
             <span>Проверить снова</span>
@@ -146,14 +175,15 @@
       <div class="photo-modal-content" @click.stop>
         <button class="modal-close-btn" @click="closePhotoModal">✕</button>
         <img 
-          :src="'http://localhost:8000' + scanResult?.contractor?.photo" 
-          :alt="scanResult?.contractor?.full_name"
+          :src="'http://localhost:8000' + contractorData?.photo" 
+          :alt="contractorData?.full_name"
           class="modal-photo"
           @error="(e) => e.target.style.display = 'none'"
         />
         <div class="modal-photo-info">
-          <p class="modal-photo-name">{{ scanResult?.contractor?.full_name }}</p>
-          <p class="modal-photo-phone">{{ scanResult?.contractor?.phone_number }}</p>
+          <p class="modal-photo-name">{{ contractorData?.full_name }}</p>
+          <p class="modal-photo-phone">{{ contractorData?.phone_number }}</p>
+          <p class="modal-photo-org">🏢 {{ contractorData?.organization || 'Не указана' }}</p>
         </div>
       </div>
     </div>
@@ -174,11 +204,19 @@ export default {
     return {
       manualCode: '',
       isLoading: false,
+      isProcessing: false,
       isCameraActive: false,
-      scanResult: null,
+      contractorFound: false,
+      contractorData: null,
+      isOnTerritory: false,
+      daysRemaining: null,
+      scanError: false,
+      scanErrorMessage: '',
+      actionResult: null,
       stream: null,
       scanInterval: null,
-      showPhotoModal: false
+      showPhotoModal: false,
+      currentUser: null // Данные текущего пользователя (охранника)
     }
   },
   computed: {
@@ -186,43 +224,95 @@ export default {
       return this.manualCode.length === 4 && /^\d{4}$/.test(this.manualCode)
     }
   },
+  mounted() {
+    // Загружаем данные текущего пользователя из localStorage
+    const userDataStr = localStorage.getItem('userData')
+    if (userDataStr) {
+      try {
+        this.currentUser = JSON.parse(userDataStr)
+        console.log('Current user (guard):', this.currentUser)
+      } catch (e) {
+        console.error('Ошибка парсинга userData:', e)
+      }
+    }
+  },
   methods: {
+    getCsrfToken() {
+      const name = 'csrftoken'
+      let cookieValue = null
+      if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';')
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim()
+          if (cookie.substring(0, name.length + 1) === (name + '=')) {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
+            break
+          }
+        }
+      }
+      return cookieValue
+    },
+    
+    getDaysClass(days) {
+      if (days === 'Истек' || days === 'Заблокирован' || days === '—') return 'expired'
+      if (typeof days !== 'number') return ''
+      if (days <= 3) return 'danger'
+      if (days <= 7) return 'warning'
+      return 'success'
+    },
+    
     formatCodeInput() {
       this.manualCode = this.manualCode.replace(/\D/g, '').slice(0, 4)
     },
     
-    async checkManualCode() {
+    calculateDaysRemaining(validUntil) {
+      if (!validUntil) return '—'
+      
+      const today = new Date()
+      const until = new Date(validUntil)
+      const diffTime = until - today
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      
+      if (diffDays < 0) return '⏰ Истек'
+      return diffDays
+    },
+    
+    async findContractor() {
       if (!this.isCodeValid) {
-        this.scanResult = {
-          success: false,
-          message: 'Введите 4 цифры кода доступа'
-        }
+        this.showError('Введите 4 цифры кода доступа')
         return
       }
       
       this.isLoading = true
-      this.scanResult = null
+      this.resetState()
       
       try {
-        const response = await axios.post('/api/scan-qr/', {
+        const csrfToken = this.getCsrfToken()
+        const response = await axios.post('/api/get-contractor-info/', {
           access_code: this.manualCode
+        }, {
+          headers: { 'X-CSRFToken': csrfToken }
         })
         
-        this.scanResult = {
-          success: true,
-          message: response.data.message || 'Проезд разрешен ✅',
-          contractor: response.data.contractor,
-          access_time: response.data.access_time,
-          access_method: 'code'
+        console.log('Find contractor response:', response.data)
+        
+        if (response.data.success) {
+          this.contractorFound = true
+          this.contractorData = response.data.contractor
+          this.isOnTerritory = response.data.is_on_territory || false
+          this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
+          this.scanError = false
+          this.actionResult = null
         }
       } catch (error) {
+        console.error('Find contractor error:', error.response?.data)
         const errorData = error.response?.data || {}
-        this.scanResult = {
-          success: false,
-          message: errorData.message || 'Доступ запрещен ❌',
-          reason: errorData.reason || errorData.error,
-          contractor: errorData.contractor,
-          access_method: 'code'
+        this.showError(errorData.message || errorData.reason || 'Подрядчик не найден')
+        this.contractorData = errorData.contractor || null
+        if (this.contractorData) {
+          this.contractorFound = true
+          this.isOnTerritory = errorData.is_on_territory || false
+          this.daysRemaining = this.calculateDaysRemaining(errorData.valid_until)
         }
       } finally {
         this.isLoading = false
@@ -231,8 +321,7 @@ export default {
     
     async startCamera() {
       try {
-        this.scanResult = null
-        this.manualCode = ''
+        this.resetState()
         
         this.stream = await navigator.mediaDevices.getUserMedia({
           video: { 
@@ -276,28 +365,99 @@ export default {
     async processQRCode(qrData) {
       try {
         this.stopCamera()
+        this.isLoading = true
+        this.resetState()
         
-        const response = await axios.post('/api/scan-qr/', {
+        const csrfToken = this.getCsrfToken()
+        const response = await axios.post('/api/get-contractor-info/', {
           qr_code: qrData
+        }, {
+          headers: { 'X-CSRFToken': csrfToken }
         })
         
-        this.scanResult = {
-          success: true,
-          message: response.data.message || 'Проезд разрешен ✅',
-          contractor: response.data.contractor,
-          access_time: response.data.access_time,
-          access_method: 'qr'
+        console.log('QR Find response:', response.data)
+        
+        if (response.data.success) {
+          this.contractorFound = true
+          this.contractorData = response.data.contractor
+          this.isOnTerritory = response.data.is_on_territory || false
+          this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
+          this.scanError = false
+          this.actionResult = null
         }
       } catch (error) {
+        console.error('QR Find error:', error.response?.data)
         const errorData = error.response?.data || {}
-        this.scanResult = {
-          success: false,
-          message: errorData.message || 'Доступ запрещен ❌',
-          reason: errorData.reason || errorData.error,
-          contractor: errorData.contractor,
-          access_method: 'qr'
+        this.showError(errorData.message || errorData.reason || 'Подрядчик не найден')
+        this.contractorData = errorData.contractor || null
+        if (this.contractorData) {
+          this.contractorFound = true
+          this.isOnTerritory = errorData.is_on_territory || false
+          this.daysRemaining = this.calculateDaysRemaining(errorData.valid_until)
         }
+      } finally {
+        this.isLoading = false
       }
+    },
+    
+    async processAccess(type) {
+      this.isProcessing = true
+      this.actionResult = null
+      
+      try {
+        const csrfToken = this.getCsrfToken()
+        
+        // Отправляем запрос с данными охранника
+        const response = await axios.post('/api/scan-qr/', {
+          access_code: this.contractorData?.access_code,
+          access_type: type,
+          guard_phone: this.currentUser?.phone_number, // Передаем телефон охранника
+          guard_name: this.currentUser?.full_name // Передаем имя охранника
+        }, {
+          headers: { 'X-CSRFToken': csrfToken }
+        })
+        
+        console.log('Process access response:', response.data)
+        
+        if (response.data.success) {
+          this.isOnTerritory = response.data.is_on_territory || false
+          if (response.data.contractor) {
+            this.contractorData = response.data.contractor
+          }
+          if (response.data.valid_until) {
+            this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
+          }
+          this.actionResult = {
+            success: true,
+            message: response.data.message || 'Операция выполнена успешно'
+          }
+        }
+      } catch (error) {
+        console.error('Process access error:', error.response?.data)
+        const errorData = error.response?.data || {}
+        this.actionResult = {
+          success: false,
+          message: errorData.message || errorData.reason || 'Ошибка операции'
+        }
+      } finally {
+        this.isProcessing = false
+      }
+    },
+    
+    showError(message) {
+      this.scanError = true
+      this.scanErrorMessage = message
+      this.contractorFound = false
+    },
+    
+    resetState() {
+      this.contractorFound = false
+      this.contractorData = null
+      this.isOnTerritory = false
+      this.daysRemaining = null
+      this.scanError = false
+      this.scanErrorMessage = ''
+      this.actionResult = null
     },
     
     stopCamera() {
@@ -313,15 +473,17 @@ export default {
     },
     
     resetScanner() {
-      this.scanResult = null
+      this.resetState()
       this.manualCode = ''
       this.isLoading = false
+      this.isProcessing = false
       this.showPhotoModal = false
+      this.stopCamera()
       this.$refs.codeInput?.focus()
     },
     
     openPhotoModal() {
-      if (this.scanResult?.contractor?.photo) {
+      if (this.contractorData?.photo) {
         this.showPhotoModal = true
         document.body.style.overflow = 'hidden'
       }
@@ -330,20 +492,6 @@ export default {
     closePhotoModal() {
       this.showPhotoModal = false
       document.body.style.overflow = ''
-    },
-    
-    formatTime(timeString) {
-      if (!timeString) return ''
-      try {
-        const date = new Date(timeString)
-        return date.toLocaleTimeString('ru-RU', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        })
-      } catch {
-        return timeString
-      }
     }
   },
   beforeUnmount() {
@@ -354,6 +502,7 @@ export default {
 </script>
 
 <style scoped>
+/* Все стили остаются без изменений */
 .guard-view {
   min-height: 80vh;
   padding: 20px;
@@ -371,7 +520,7 @@ export default {
 
 .header-section {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 25px;
 }
 
 .header-section h1 {
@@ -466,7 +615,7 @@ export default {
 .scan-btn.primary {
   background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
   color: white;
-  min-width: 140px;
+  min-width: 120px;
 }
 
 .scan-btn.primary:hover:not(:disabled) {
@@ -607,58 +756,37 @@ export default {
   to { transform: rotate(360deg); }
 }
 
-.scan-result {
-  margin-top: 10px;
-  padding: 24px;
+.contractor-card {
+  border: 2px solid #1a237e;
   border-radius: 16px;
+  padding: 20px;
   animation: fadeIn 0.4s ease;
+  background: #f8f9ff;
 }
 
-.scan-result.success {
-  background: #e8f5e9;
-  border: 2px solid #4CAF50;
-}
-
-.scan-result.error {
-  background: #fce4ec;
-  border: 2px solid #e53935;
-}
-
-.result-header {
+.card-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #e0e0e0;
 }
 
-.result-icon-wrapper {
-  flex-shrink: 0;
+.card-icon {
+  font-size: 24px;
 }
 
-.result-icon {
-  font-size: 40px;
-}
-
-.result-title h3 {
-  font-size: 22px;
+.card-header h3 {
+  font-size: 18px;
+  color: #1a237e;
   margin: 0;
-  color: #333;
-}
-
-.result-message {
-  margin: 4px 0 0 0;
-  color: #666;
-  font-size: 15px;
 }
 
 .contractor-info {
   display: flex;
   gap: 20px;
-  margin: 15px 0 20px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 14px;
-  backdrop-filter: blur(10px);
+  margin-bottom: 20px;
 }
 
 .contractor-photo-wrapper {
@@ -750,10 +878,6 @@ export default {
   font-size: 13px;
 }
 
-.detail-value.error-text {
-  color: #c62828;
-}
-
 .detail-value.verified {
   color: #2e7d32;
 }
@@ -762,10 +886,90 @@ export default {
   color: #e65100;
 }
 
-.no-contractor {
-  text-align: center;
-  padding: 15px;
-  color: #888;
+.detail-value.success {
+  color: #2e7d32;
+}
+
+.detail-value.warning {
+  color: #e65100;
+}
+
+.detail-value.danger {
+  color: #c62828;
+}
+
+.detail-value.expired {
+  color: #999;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin: 15px 0;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.action-btn:active {
+  transform: scale(0.96);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.entry-btn {
+  background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
+  color: white;
+}
+
+.entry-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 15px rgba(46, 125, 50, 0.3);
+}
+
+.exit-btn {
+  background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+  color: white;
+}
+
+.exit-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 15px rgba(198, 40, 40, 0.3);
+}
+
+.action-result {
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.action-result.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+.action-result.error {
+  background: #fce4ec;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.result-icon {
+  font-size: 20px;
 }
 
 .reset-btn {
@@ -777,6 +981,40 @@ export default {
 
 .reset-btn:hover {
   background: #e0e0e0;
+}
+
+.scan-result.error {
+  padding: 24px;
+  border-radius: 16px;
+  background: #fce4ec;
+  border: 2px solid #e53935;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.result-icon-wrapper {
+  flex-shrink: 0;
+}
+
+.result-icon {
+  font-size: 40px;
+}
+
+.result-title h3 {
+  font-size: 22px;
+  margin: 0;
+  color: #333;
+}
+
+.result-message {
+  margin: 4px 0 0 0;
+  color: #666;
+  font-size: 15px;
 }
 
 .photo-modal {
@@ -855,6 +1093,12 @@ export default {
   font-size: 16px;
   color: #666;
   margin: 0;
+}
+
+.modal-photo-org {
+  font-size: 16px;
+  color: #333;
+  margin: 5px 0 0 0;
 }
 
 @keyframes fadeIn {
@@ -954,6 +1198,10 @@ export default {
   
   .detail-value {
     text-align: center;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
   }
   
   .result-header {

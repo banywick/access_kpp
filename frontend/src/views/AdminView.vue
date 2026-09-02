@@ -16,6 +16,38 @@
         <p class="subtitle">Управление списками доступа и подрядчиками</p>
       </div>
 
+      <!-- Дашборд статистики -->
+      <div class="dashboard-stats">
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-info">
+            <div class="stat-number">{{ totalContractors }}</div>
+            <div class="stat-label">Всего подрядчиков</div>
+          </div>
+        </div>
+        <div class="stat-card territory">
+          <div class="stat-icon">📍</div>
+          <div class="stat-info">
+            <div class="stat-number">{{ contractorsOnTerritory }}</div>
+            <div class="stat-label">На территории</div>
+          </div>
+        </div>
+        <div class="stat-card off-territory">
+          <div class="stat-icon">🚫</div>
+          <div class="stat-info">
+            <div class="stat-number">{{ contractorsOffTerritory }}</div>
+            <div class="stat-label">Не на территории</div>
+          </div>
+        </div>
+        <div class="stat-card verified">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <div class="stat-number">{{ verifiedContractors }}</div>
+            <div class="stat-label">Верифицированы</div>
+          </div>
+        </div>
+      </div>
+
       <div class="admin-tabs">
         <button 
           class="tab-btn" 
@@ -55,8 +87,10 @@
               <tr>
                 <th>ФИО</th>
                 <th>Телефон</th>
+                <th>Организация</th>
                 <th>Код доступа</th>
                 <th>Статус</th>
+                <th>На территории</th>
                 <th>Фото</th>
                 <th>Действия</th>
               </tr>
@@ -65,6 +99,7 @@
               <tr v-for="contractor in contractors" :key="contractor.id">
                 <td>{{ contractor.full_name || 'Не указано' }}</td>
                 <td>{{ contractor.phone_number }}</td>
+                <td>{{ contractor.organization || 'Не указана' }}</td>
                 <td>
                   <span v-if="contractor.access_code" class="access-code-badge">
                     {{ contractor.access_code }}
@@ -74,6 +109,11 @@
                 <td>
                   <span class="status-badge" :class="contractor.is_verified ? 'verified' : 'pending'">
                     {{ contractor.is_verified ? '✅ Верифицирован' : '⏳ Ожидает' }}
+                  </span>
+                </td>
+                <td>
+                  <span class="status-badge" :class="getTerritoryStatus(contractor) ? 'on-territory' : 'off-territory'">
+                    {{ getTerritoryStatus(contractor) ? '📍 На территории' : '🚫 Не на территории' }}
                   </span>
                 </td>
                 <td>
@@ -93,7 +133,7 @@
                 </td>
               </tr>
               <tr v-if="contractors.length === 0">
-                <td colspan="6" class="empty-state">
+                <td colspan="8" class="empty-state">
                   <span class="empty-icon">📭</span>
                   <p>Нет подрядчиков</p>
                   <p class="empty-hint">Нажмите "Добавить подрядчика" чтобы создать</p>
@@ -119,8 +159,11 @@
               <tr>
                 <th>Подрядчик</th>
                 <th>Телефон</th>
+                <th>Организация</th>
                 <th>Код доступа</th>
                 <th>Доступ</th>
+                <th>Осталось дней</th>
+                <th>На территории</th>
                 <th>Причина</th>
                 <th>Действия</th>
               </tr>
@@ -129,6 +172,7 @@
               <tr v-for="item in accessList" :key="item.id">
                 <td>{{ item.contractor_info?.full_name || 'Не указано' }}</td>
                 <td>{{ item.contractor_info?.phone_number || '-' }}</td>
+                <td>{{ item.contractor_info?.organization || '-' }}</td>
                 <td>
                   <span v-if="item.contractor_info?.access_code" class="access-code-badge">
                     {{ item.contractor_info.access_code }}
@@ -138,6 +182,16 @@
                 <td>
                   <span class="status-badge" :class="item.is_allowed ? 'verified' : 'banned'">
                     {{ item.is_allowed ? '✅ Разрешен' : '❌ Запрещен' }}
+                  </span>
+                </td>
+                <td>
+                  <span class="days-badge" :class="getDaysClass(getAccessDaysRemaining(item))">
+                    {{ getAccessDaysRemaining(item) }}
+                  </span>
+                </td>
+                <td>
+                  <span class="status-badge" :class="getTerritoryStatus(item.contractor_info) ? 'on-territory' : 'off-territory'">
+                    {{ getTerritoryStatus(item.contractor_info) ? '📍 На территории' : '🚫 Не на территории' }}
                   </span>
                 </td>
                 <td>{{ item.ban_reason || '-' }}</td>
@@ -152,7 +206,7 @@
                 </td>
               </tr>
               <tr v-if="accessList.length === 0">
-                <td colspan="6" class="empty-state">Нет записей</td>
+                <td colspan="9" class="empty-state">Нет записей</td>
               </tr>
             </tbody>
           </table>
@@ -175,7 +229,10 @@
                 <th>Время</th>
                 <th>Подрядчик</th>
                 <th>Телефон</th>
+                <th>Организация</th>
                 <th>Способ</th>
+                <th>Тип</th>
+                <th>Охранник</th>
                 <th>Статус</th>
               </tr>
             </thead>
@@ -184,9 +241,20 @@
                 <td>{{ formatDate(log.scanned_at) }}</td>
                 <td>{{ log.contractor_info?.full_name || 'Не указано' }}</td>
                 <td>{{ log.contractor_info?.phone_number || '-' }}</td>
+                <td>{{ log.contractor_info?.organization || '-' }}</td>
                 <td>
                   <span class="method-badge" :class="log.access_method">
                     {{ log.access_method === 'qr' ? '📷 QR' : '🔑 Код' }}
+                  </span>
+                </td>
+                <td>
+                  <span class="type-badge" :class="log.access_type">
+                    {{ log.access_type === 'entry' ? '🚗 Въезд' : '🚗 Выезд' }}
+                  </span>
+                </td>
+                <td>
+                  <span class="guard-name">
+                    {{ log.scanned_by_name || log.scanned_by_info?.full_name || 'Система' }}
                   </span>
                 </td>
                 <td>
@@ -196,7 +264,7 @@
                 </td>
               </tr>
               <tr v-if="accessLogs.length === 0">
-                <td colspan="5" class="empty-state">Нет записей</td>
+                <td colspan="8" class="empty-state">Нет записей</td>
               </tr>
             </tbody>
           </table>
@@ -254,6 +322,16 @@
           </div>
           
           <div class="form-group">
+            <label>Организация *</label>
+            <input 
+              v-model="newContractor.organization" 
+              type="text" 
+              placeholder="Название организации"
+              required
+            />
+          </div>
+          
+          <div class="form-group">
             <label>Фото</label>
             <input 
               type="file" 
@@ -290,8 +368,9 @@
         <div class="modal-photo-info">
           <p class="modal-photo-name">{{ selectedContractor?.full_name }}</p>
           <p class="modal-photo-phone">{{ selectedContractor?.phone_number }}</p>
-          <p v-if="selectedContractor?.access_code" class="modal-photo-code">
-            🔑 Код доступа: <strong>{{ selectedContractor.access_code }}</strong>
+          <p class="modal-photo-org">🏢 {{ selectedContractor?.organization || 'Не указана' }}</p>
+          <p class="modal-photo-status">
+            {{ getTerritoryStatus(selectedContractor) ? '📍 На территории' : '🚫 Не на территории' }}
           </p>
         </div>
       </div>
@@ -306,7 +385,6 @@ axios.defaults.xsrfCookieName = 'csrftoken'
 axios.defaults.xsrfHeaderName = 'X-CSRFToken'
 axios.defaults.withCredentials = true
 
-// Базовый URL для API
 const API_BASE_URL = 'http://localhost:8000'
 
 export default {
@@ -326,11 +404,18 @@ export default {
       accessList: [],
       accessLogs: [],
       
+      // Статистика
+      totalContractors: 0,
+      contractorsOnTerritory: 0,
+      contractorsOffTerritory: 0,
+      verifiedContractors: 0,
+      
       newContractor: {
         phone_number: '',
         first_name: '',
         last_name: '',
         patronymic: '',
+        organization: '',
         photo: null
       },
       
@@ -374,30 +459,51 @@ export default {
       return cookieValue
     },
     
-    /**
-     * Формирует правильный URL для изображения
-     * Всегда возвращает URL с localhost:8000
-     */
     getImageUrl(photoPath) {
       if (!photoPath) return ''
-      
-      // Если это уже полный URL с localhost
-      if (photoPath.startsWith('http://localhost:8000')) {
-        return photoPath
-      }
-      
-      // Если это уже полный URL с другим доменом
-      if (photoPath.startsWith('http')) {
-        return photoPath
-      }
-      
-      // Если путь начинается с /media/
+      if (photoPath.startsWith('http')) return photoPath
       if (photoPath.startsWith('/media/')) {
         return `${API_BASE_URL}${photoPath}`
       }
-      
-      // Для всех остальных случаев
       return `${API_BASE_URL}/media/${photoPath}`
+    },
+    
+    getTerritoryStatus(contractor) {
+      if (!contractor || !contractor.id) return false
+      
+      const logs = this.accessLogs.filter(log => 
+        log.contractor_info?.id === contractor.id && log.is_successful
+      )
+      
+      if (logs.length === 0) return false
+      
+      const lastLog = logs.sort((a, b) => 
+        new Date(b.scanned_at) - new Date(a.scanned_at)
+      )[0]
+      
+      return lastLog?.access_type === 'entry'
+    },
+    
+    getAccessDaysRemaining(access) {
+      if (!access) return '—'
+      if (!access.is_allowed) return '❌ Заблокирован'
+      if (!access.valid_until) return '—'
+      
+      const today = new Date()
+      const validUntil = new Date(access.valid_until)
+      const diffTime = validUntil - today
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      
+      if (diffDays < 0) return '⏰ Истек'
+      return diffDays
+    },
+    
+    getDaysClass(days) {
+      if (days === '—' || days === '❌ Заблокирован' || days === '⏰ Истек') return 'expired'
+      if (typeof days !== 'number') return ''
+      if (days <= 3) return 'danger'
+      if (days <= 7) return 'warning'
+      return 'success'
     },
     
     handleImageError(e) {
@@ -414,6 +520,29 @@ export default {
       this.$router.push('/')
     },
     
+    updateStats() {
+      // Общее количество подрядчиков
+      this.totalContractors = this.contractors.length
+      
+      // Количество верифицированных
+      this.verifiedContractors = this.contractors.filter(c => c.is_verified).length
+      
+      // Количество на территории и не на территории
+      let onTerritory = 0
+      let offTerritory = 0
+      
+      this.contractors.forEach(contractor => {
+        if (this.getTerritoryStatus(contractor)) {
+          onTerritory++
+        } else {
+          offTerritory++
+        }
+      })
+      
+      this.contractorsOnTerritory = onTerritory
+      this.contractorsOffTerritory = offTerritory
+    },
+    
     async loadData() {
       await Promise.all([
         this.loadContractors(),
@@ -427,9 +556,6 @@ export default {
         const response = await axios.get(`${API_BASE_URL}/api/contractors/`)
         this.allUsers = response.data.results || response.data || []
         
-        console.log('📊 Все пользователи:', this.allUsers.length)
-        
-        // Фильтруем только подрядчиков
         this.contractors = this.allUsers.filter(user => {
           if (user.role === 'contractor') return true
           if (!user.role) {
@@ -440,7 +566,13 @@ export default {
           return true
         })
         
+        // Обновляем статистику
+        this.updateStats()
+        
+        console.log('📊 Все пользователи:', this.allUsers.length)
         console.log('✅ Отфильтровано подрядчиков:', this.contractors.length)
+        console.log('📊 На территории:', this.contractorsOnTerritory)
+        console.log('📊 Не на территории:', this.contractorsOffTerritory)
       } catch (error) {
         console.error('❌ Ошибка загрузки подрядчиков:', error)
       }
@@ -463,14 +595,19 @@ export default {
           params: { date: this.selectedDate }
         })
         this.accessLogs = response.data.results || response.data || []
+        console.log('📊 Загружено логов:', this.accessLogs.length)
+        
+        // Обновляем статистику после загрузки логов
+        this.updateStats()
       } catch (error) {
         console.error('Ошибка загрузки логов:', error)
       }
     },
     
     async addContractor() {
-      if (!this.newContractor.phone_number || !this.newContractor.first_name || !this.newContractor.last_name) {
-        alert('Заполните обязательные поля: Телефон, Имя, Фамилия')
+      if (!this.newContractor.phone_number || !this.newContractor.first_name || 
+          !this.newContractor.last_name || !this.newContractor.organization) {
+        alert('Заполните обязательные поля: Телефон, Имя, Фамилия, Организация')
         return
       }
       
@@ -481,6 +618,7 @@ export default {
         formData.append('phone_number', this.newContractor.phone_number)
         formData.append('first_name', this.newContractor.first_name)
         formData.append('last_name', this.newContractor.last_name)
+        formData.append('organization', this.newContractor.organization)
         formData.append('role', 'contractor')
         if (this.newContractor.patronymic) {
           formData.append('patronymic', this.newContractor.patronymic)
@@ -501,6 +639,7 @@ export default {
         this.showAddModal = false
         this.resetForm()
         await this.loadContractors()
+        await this.loadAccessList()
         
         alert('✅ Подрядчик успешно добавлен!')
       } catch (error) {
@@ -580,6 +719,7 @@ export default {
         first_name: '',
         last_name: '',
         patronymic: '',
+        organization: '',
         photo: null
       }
       this.photoPreview = null
@@ -589,12 +729,10 @@ export default {
       if (!dateString) return '-'
       try {
         const date = new Date(dateString)
-        return date.toLocaleString('ru-RU', {
+        return date.toLocaleDateString('ru-RU', {
           day: '2-digit',
           month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
+          year: 'numeric'
         })
       } catch {
         return dateString
@@ -652,6 +790,79 @@ export default {
 .subtitle {
   color: #666;
   font-size: 16px;
+}
+
+/* Дашборд статистики */
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  transition: transform 0.3s, box-shadow 0.3s;
+  border: 1px solid #e0e0e0;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.stat-card .stat-icon {
+  font-size: 32px;
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border-radius: 10px;
+}
+
+.stat-card .stat-info {
+  flex: 1;
+}
+
+.stat-card .stat-number {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1a237e;
+  line-height: 1.2;
+}
+
+.stat-card .stat-label {
+  font-size: 14px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.stat-card.territory .stat-icon {
+  background: #e3f2fd;
+}
+.stat-card.territory .stat-number {
+  color: #0d47a1;
+}
+
+.stat-card.off-territory .stat-icon {
+  background: #f5f5f5;
+}
+.stat-card.off-territory .stat-number {
+  color: #666;
+}
+
+.stat-card.verified .stat-icon {
+  background: #e8f5e9;
+}
+.stat-card.verified .stat-number {
+  color: #2e7d32;
 }
 
 .admin-tabs {
@@ -729,7 +940,7 @@ export default {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-  min-width: 700px;
+  min-width: 900px;
 }
 
 .data-table thead {
@@ -777,6 +988,45 @@ export default {
 .status-badge.banned {
   background: #fce4ec;
   color: #c62828;
+}
+
+.status-badge.on-territory {
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+
+.status-badge.off-territory {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.days-badge {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.days-badge.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.days-badge.warning {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.days-badge.danger {
+  background: #fce4ec;
+  color: #c62828;
+}
+
+.days-badge.expired {
+  background: #f5f5f5;
+  color: #999;
 }
 
 .access-code-badge {
@@ -839,6 +1089,28 @@ export default {
 .method-badge.code {
   background: #f3e5f5;
   color: #6a1b9a;
+}
+
+.type-badge {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.type-badge.entry {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.type-badge.exit {
+  background: #fce4ec;
+  color: #c62828;
+}
+
+.guard-name {
+  font-weight: 600;
+  color: #1a237e;
 }
 
 .action-btn {
@@ -1180,15 +1452,17 @@ export default {
   margin: 0;
 }
 
-.modal-photo-code {
+.modal-photo-org {
   font-size: 16px;
   color: #333;
-  margin: 10px 0 0 0;
+  margin: 5px 0 0 0;
 }
 
-.modal-photo-code strong {
+.modal-photo-status {
+  font-size: 16px;
   color: #1a237e;
-  font-size: 20px;
+  margin: 5px 0 0 0;
+  font-weight: 600;
 }
 
 @keyframes fadeIn {
@@ -1241,6 +1515,10 @@ export default {
     width: 40px;
     height: 40px;
   }
+  
+  .dashboard-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 480px) {
@@ -1258,7 +1536,7 @@ export default {
   
   .data-table {
     font-size: 12px;
-    min-width: 500px;
+    min-width: 600px;
   }
   
   .data-table th,
@@ -1291,6 +1569,25 @@ export default {
   
   .modal-photo-phone {
     font-size: 14px;
+  }
+  
+  .dashboard-stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  
+  .stat-card {
+    padding: 15px;
+  }
+  
+  .stat-card .stat-number {
+    font-size: 22px;
+  }
+  
+  .stat-card .stat-icon {
+    font-size: 24px;
+    width: 40px;
+    height: 40px;
   }
 }
 </style>

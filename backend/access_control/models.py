@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from datetime import timedelta
 import re
 import hashlib
 import json
@@ -10,11 +11,16 @@ import random
 import os
 
 
+# Функция для значения по умолчанию valid_until
+def default_valid_until():
+    """Возвращает дату через 30 дней от сегодня"""
+    return timezone.now().date() + timedelta(days=30)
+
+
 class ContractorManager(BaseUserManager):
     """Кастомный менеджер для модели Contractor"""
     
     def create_user(self, phone_number, password=None, **extra_fields):
-        """Создание обычного пользователя"""
         if not phone_number:
             raise ValueError('Номер телефона обязателен')
         
@@ -25,6 +31,7 @@ class ContractorManager(BaseUserManager):
             first_name=extra_fields.get('first_name', ''),
             last_name=extra_fields.get('last_name', ''),
             patronymic=extra_fields.get('patronymic', ''),
+            organization=extra_fields.get('organization', ''),
             role=extra_fields.get('role', 'contractor'),
             is_active=extra_fields.get('is_active', True),
             is_staff=extra_fields.get('is_staff', False),
@@ -41,7 +48,6 @@ class ContractorManager(BaseUserManager):
         return user
     
     def create_superuser(self, phone_number, password=None, **extra_fields):
-        """Создание суперпользователя"""
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
@@ -59,7 +65,6 @@ class ContractorManager(BaseUserManager):
         return self.create_user(phone_number, password, **extra_fields)
     
     def normalize_phone_number(self, phone_number):
-        """Нормализация белорусского номера телефона"""
         cleaned = ''.join(filter(str.isdigit, phone_number))
         
         if len(cleaned) < 9:
@@ -89,7 +94,6 @@ class ContractorManager(BaseUserManager):
 
 
 def upload_to_photo(instance, filename):
-    """Генерация пути для сохранения фото"""
     date_path = timezone.now().strftime('%Y/%m/%d')
     ext = filename.split('.')[-1] if '.' in filename else 'jpg'
     phone_clean = instance.phone_number.replace('+', '').replace(' ', '')
@@ -98,7 +102,7 @@ def upload_to_photo(instance, filename):
 
 
 class Contractor(AbstractUser):
-    """Модель подрядчика - замена стандартному User"""
+    """Модель пользователя"""
     
     class Role(models.TextChoices):
         CONTRACTOR = 'contractor', 'Подрядчик'
@@ -118,11 +122,20 @@ class Contractor(AbstractUser):
         ],
         verbose_name="Номер телефона"
     )
+    first_name = models.CharField(max_length=150, verbose_name="Имя")
+    last_name = models.CharField(max_length=150, verbose_name="Фамилия")
     patronymic = models.CharField(
         max_length=100, 
         blank=True, 
         null=True,
         verbose_name="Отчество"
+    )
+    organization = models.CharField(
+        max_length=200,
+        blank=False,
+        null=False,
+        default='',
+        verbose_name="Организация"
     )
     photo = models.ImageField(
         upload_to=upload_to_photo,
@@ -182,7 +195,7 @@ class Contractor(AbstractUser):
     objects = ContractorManager()
     
     USERNAME_FIELD = 'phone_number'
-    REQUIRED_FIELDS = ['first_name', 'last_name']
+    REQUIRED_FIELDS = ['first_name', 'last_name', 'organization']
     
     class Meta:
         verbose_name = "Пользователь"
@@ -200,7 +213,6 @@ class Contractor(AbstractUser):
         return f"{self.first_name} {self.last_name}".strip()
     
     def generate_qr_code(self):
-        """Генерация QR кода"""
         data = {
             'id': self.id,
             'phone': self.phone_number,
@@ -214,7 +226,6 @@ class Contractor(AbstractUser):
         return self.qr_code
     
     def generate_access_code(self):
-        """Генерация уникального 4-значного кода"""
         while True:
             code = str(random.randint(1000, 9999))
             if not Contractor.objects.filter(access_code=code).exists():
@@ -223,7 +234,6 @@ class Contractor(AbstractUser):
                 return code
     
     def has_usable_password(self):
-        """Проверка наличия пароля"""
         return self.password is not None and self.password != ''
 
 
@@ -248,6 +258,14 @@ class AccessList(models.Model):
         null=True,
         verbose_name="Причина запрета"
     )
+    valid_from = models.DateField(
+        default=timezone.now,
+        verbose_name="Действителен с"
+    )
+    valid_until = models.DateField(
+        default=default_valid_until,  # Используем функцию вместо lambda
+        verbose_name="Действителен до"
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name="Дата создания"
@@ -262,10 +280,20 @@ class AccessList(models.Model):
     def __str__(self):
         status = "✅" if self.is_allowed else "❌"
         return f"{self.date} - {self.contractor} {status}"
+    
+    def is_valid(self):
+        """Проверяет, действителен ли доступ на текущую дату"""
+        today = timezone.now().date()
+        return self.is_allowed and self.valid_from <= today <= self.valid_until
 
 
 class AccessLog(models.Model):
     """Лог сканирования QR кодов и ввода кодов"""
+    
+    class AccessType(models.TextChoices):
+        ENTRY = 'entry', 'Въезд'
+        EXIT = 'exit', 'Выезд'
+    
     contractor = models.ForeignKey(
         Contractor, 
         on_delete=models.CASCADE,
@@ -305,6 +333,12 @@ class AccessLog(models.Model):
         default='qr',
         verbose_name="Способ доступа"
     )
+    access_type = models.CharField(
+        max_length=10,
+        choices=AccessType.choices,
+        default=AccessType.ENTRY,
+        verbose_name="Тип доступа"
+    )
     is_successful = models.BooleanField(
         default=True,
         verbose_name="Успешно"
@@ -319,6 +353,10 @@ class AccessLog(models.Model):
         verbose_name = "Лог доступа"
         verbose_name_plural = "Логи доступа"
         ordering = ['-scanned_at']
+        indexes = [
+            models.Index(fields=['contractor', 'is_successful']),
+            models.Index(fields=['scanned_at']),
+        ]
     
     def __str__(self):
-        return f"{self.scanned_at} - {self.contractor} ({self.get_access_method_display()})"
+        return f"{self.scanned_at} - {self.contractor} ({self.get_access_method_display()}) - {self.get_access_type_display()}"

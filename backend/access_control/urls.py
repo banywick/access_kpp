@@ -6,6 +6,7 @@ from .views import (
     AccessListViewSet, 
     AccessLogViewSet,
     LoginView,
+    GetContractorInfoView,  # Новый импорт
     ContractorRegisterView,
     ContractorPhotoView,
     ContractorVerifyView,
@@ -22,6 +23,7 @@ router.register(r'access-logs', AccessLogViewSet, basename='access-log')
 urlpatterns = [
     path('', include(router.urls)),
     path('login/', LoginView.as_view(), name='login'),
+    path('get-contractor-info/', GetContractorInfoView.as_view(), name='get-contractor-info'),
     path('register/', ContractorRegisterView.as_view(), name='register'),
     path('upload-photo/', ContractorPhotoView.as_view(), name='upload-photo'),
     path('verify-photo/', ContractorVerifyView.as_view(), name='verify-photo'),

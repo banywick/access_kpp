@@ -223,3 +223,19 @@ def format_belarus_phone(phone_number):
     part3 = cleaned[7:9]
     
     return f"+375 {operator} {part1}-{part2}-{part3}"
+
+# backend/access_control/utils.py
+
+def get_today_access(contractor):
+    """
+    Получить статус доступа на сегодня с проверкой срока действия
+    """
+    today = timezone.now().date()
+    try:
+        access = AccessList.objects.get(
+            contractor=contractor,
+            date=today
+        )
+        return access
+    except AccessList.DoesNotExist:
+        return None

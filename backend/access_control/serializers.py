@@ -15,7 +15,7 @@ class ContractorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contractor
         fields = [
-            'id', 'first_name', 'last_name', 'patronymic',
+            'id', 'first_name', 'last_name', 'patronymic', 'organization',
             'phone_number', 'photo', 'is_verified', 'qr_code', 
             'access_code', 'role', 'role_display', 'is_active',
             'full_name', 'created_at', 'updated_at'
@@ -40,6 +40,11 @@ class ContractorSerializer(serializers.ModelSerializer):
                 'Номер должен быть в формате +375291234567 (коды: 29, 33, 44, 25)'
             )
         return value
+    
+    def validate_organization(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Организация обязательна для заполнения')
+        return value.strip()
 
 
 class AccessListSerializer(serializers.ModelSerializer):
@@ -57,18 +62,27 @@ class AccessListSerializer(serializers.ModelSerializer):
         model = AccessList
         fields = [
             'id', 'contractor', 'contractor_id', 'contractor_info',
-            'date', 'is_allowed', 'ban_reason', 'created_at'
+            'date', 'is_allowed', 'ban_reason', 
+            'valid_from', 'valid_until',  # Добавляем поля
+            'created_at'
         ]
         read_only_fields = ['created_at']
 
+
+# backend/access_control/serializers.py (фрагмент)
 
 class AccessLogSerializer(serializers.ModelSerializer):
     contractor_info = ContractorSerializer(
         source='contractor', 
         read_only=True
     )
-    scanned_by_username = serializers.CharField(
-        source='scanned_by.get_full_name', 
+    scanned_by_info = ContractorSerializer(
+        source='scanned_by', 
+        read_only=True
+    )
+    scanned_by_name = serializers.SerializerMethodField()
+    access_type_display = serializers.CharField(
+        source='get_access_type_display',
         read_only=True
     )
     
@@ -76,19 +90,22 @@ class AccessLogSerializer(serializers.ModelSerializer):
         model = AccessLog
         fields = [
             'id', 'contractor', 'contractor_info', 'scanned_at',
-            'scanned_by', 'scanned_by_username', 
-            'qr_code_scanned', 'is_successful', 'access_method'
+            'scanned_by', 'scanned_by_info', 'scanned_by_name',
+            'qr_code_scanned', 'access_code_entered', 
+            'access_method', 'access_type', 'access_type_display',
+            'is_successful', 'ip_address'
         ]
         read_only_fields = ['scanned_at']
+    
+    def get_scanned_by_name(self, obj):
+        """Получение имени охранника, который сканировал"""
+        if obj.scanned_by:
+            return obj.scanned_by.get_full_name()
+        return None
 
 
 class PhoneVerificationSerializer(serializers.Serializer):
-    """Сериализатор для проверки телефона"""
-    phone_number = serializers.CharField(
-        max_length=20,
-        required=True,
-        help_text="Номер телефона в формате +375291234567"
-    )
+    phone_number = serializers.CharField(max_length=20)
     
     def validate_phone_number(self, value):
         pattern = r'^\+375(29|33|44|25)\d{7}$'
@@ -100,20 +117,10 @@ class PhoneVerificationSerializer(serializers.Serializer):
 
 
 class PhotoUploadSerializer(serializers.Serializer):
-    """Сериализатор для загрузки фото"""
     phone_number = serializers.CharField(max_length=20)
-    photo = serializers.ImageField(
-        required=True,
-        error_messages={
-            'required': 'Фото обязательно для загрузки',
-            'invalid': 'Неверный формат файла. Загрузите изображение',
-            'empty': 'Файл пуст'
-        }
-    )
+    photo = serializers.ImageField()
     
     def validate_phone_number(self, value):
-        logger.info(f"Validating phone: {value}")
-        
         pattern = r'^\+375(29|33|44|25)\d{7}$'
         if not re.match(pattern, value):
             raise serializers.ValidationError(
@@ -122,26 +129,17 @@ class PhotoUploadSerializer(serializers.Serializer):
         
         try:
             contractor = Contractor.objects.get(phone_number=value)
-            logger.info(f"Contractor found: {contractor.id} - {contractor.get_full_name()}")
+            logger.info(f"Contractor found: {contractor.id}")
         except Contractor.DoesNotExist:
-            logger.error(f"Contractor with phone {value} not found")
             raise serializers.ValidationError('Пользователь с таким номером не найден')
         
         return value
     
     def validate_photo(self, value):
-        logger.info(f"Validating photo: {value.name}, size: {value.size} bytes")
-        
         if value.size > 5 * 1024 * 1024:
             raise serializers.ValidationError('Файл слишком большой. Максимальный размер 5MB')
         
-        try:
-            file_format = imghdr.what(value)
-            logger.info(f"File format detected: {file_format}")
-        except Exception as e:
-            logger.error(f"Error detecting file format: {e}")
-            raise serializers.ValidationError('Не удалось определить формат файла')
-        
+        file_format = imghdr.what(value)
         valid_formats = ['jpeg', 'jpg', 'png', 'gif']
         
         if file_format not in valid_formats:
@@ -153,26 +151,15 @@ class PhotoUploadSerializer(serializers.Serializer):
 
 
 class QRScanSerializer(serializers.Serializer):
-    """Сериализатор для сканирования QR"""
-    qr_code = serializers.CharField(
-        max_length=255,
-        required=False,
-        allow_blank=True,
-        help_text="QR код пользователя"
-    )
-    access_code = serializers.CharField(
-        max_length=4,
-        required=False,
-        allow_blank=True,
-        help_text="Код доступа"
+    qr_code = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    access_code = serializers.CharField(max_length=4, required=False, allow_blank=True)
+    access_type = serializers.ChoiceField(
+        choices=['entry', 'exit'],
+        required=True,
+        help_text="Тип доступа: entry - въезд, exit - выезд"
     )
 
 
 class ToggleAccessSerializer(serializers.Serializer):
-    """Сериализатор для переключения доступа"""
-    ban_reason = serializers.CharField(
-        max_length=255,
-        required=False,
-        allow_blank=True,
-        help_text="Причина запрета"
-    )
+    ban_reason = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
