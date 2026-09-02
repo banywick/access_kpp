@@ -7,12 +7,44 @@ from django.utils.translation import gettext_lazy as _
 from .models import Contractor, AccessList, AccessLog
 
 
+
+# backend/access_control/admin.py (добавляем в начало файла)
+
+from django.contrib.admin import SimpleListFilter
+
+class RoleFilter(SimpleListFilter):
+    """Фильтр по роли"""
+    title = 'Роль'
+    parameter_name = 'role'
+    
+    def lookups(self, request, model_admin):
+        return [
+            ('contractor', 'Подрядчик'),
+            ('guard', 'Охранник'),
+            ('admin', 'Администратор'),
+        ]
+    
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(role=self.value())
+        return queryset
+
+# Добавляем в ContractorAdmin:
+list_filter = [
+    RoleFilter,  # Кастомный фильтр
+    'is_verified',
+    'is_active',
+    'is_staff',
+    'is_superuser',
+    'created_at'
+]
+
 class ContractorCreationForm(UserCreationForm):
-    """Форма создания подрядчика без пароля"""
+    """Форма создания пользователя"""
     
     class Meta:
         model = Contractor
-        fields = ('phone_number', 'first_name', 'last_name', 'patronymic')
+        fields = ('phone_number', 'first_name', 'last_name', 'patronymic', 'role')
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -24,16 +56,15 @@ class ContractorCreationForm(UserCreationForm):
     
     def save(self, commit=True):
         user = super().save(commit=False)
-        # Если пароль не указан, устанавливаем случайный
         if not self.cleaned_data.get('password1'):
-            user.set_password(None)  # Пользователь не сможет войти по паролю
+            user.set_unusable_password()
         if commit:
             user.save()
         return user
 
 
 class ContractorChangeForm(UserChangeForm):
-    """Форма изменения подрядчика"""
+    """Форма изменения пользователя"""
     
     class Meta:
         model = Contractor
@@ -41,28 +72,34 @@ class ContractorChangeForm(UserChangeForm):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Делаем пароль необязательным
         self.fields['password'].required = False
         self.fields['password'].help_text = 'Оставьте пустым, чтобы не менять пароль'
 
 
 @admin.register(Contractor)
 class ContractorAdmin(UserAdmin):
-    """Админка для подрядчиков без пароля"""
+    """Админка для управления пользователями"""
     
-    # Используем кастомные формы
     add_form = ContractorCreationForm
     form = ContractorChangeForm
     
     list_display = [
-        'phone_number', 
+        'phone_number',
         'get_full_name', 
-        'is_verified', 
-        'has_photo', 
+        'get_role_display',
+        'is_verified',
+        'has_photo',
         'has_qr',
         'created_at'
     ]
-    list_filter = ['is_verified', 'is_active', 'is_staff', 'is_superuser', 'created_at']
+    list_filter = [
+        'role',
+        'is_verified',
+        'is_active',
+        'is_staff',
+        'is_superuser',
+        'created_at'
+    ]
     search_fields = ['phone_number', 'first_name', 'last_name', 'patronymic']
     list_editable = ['is_verified']
     list_per_page = 20
@@ -75,12 +112,12 @@ class ContractorAdmin(UserAdmin):
         (_('Personal info'), {
             'fields': ('first_name', 'last_name', 'patronymic', 'photo')
         }),
-        (_('Permissions'), {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+        (_('Role and Permissions'), {
+            'fields': ('role', 'is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
             'classes': ('collapse',),
         }),
         (_('Verification'), {
-            'fields': ('is_verified', 'qr_code'),
+            'fields': ('is_verified', 'qr_code', 'access_code'),
             'classes': ('collapse',),
         }),
         (_('Important dates'), {
@@ -93,7 +130,7 @@ class ContractorAdmin(UserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('phone_number', 'first_name', 'last_name', 'patronymic'),
+            'fields': ('phone_number', 'first_name', 'last_name', 'patronymic', 'role'),
         }),
         (_('Password (optional)'), {
             'classes': ('wide',),
@@ -109,6 +146,15 @@ class ContractorAdmin(UserAdmin):
     get_full_name.short_description = "ФИО"
     get_full_name.admin_order_field = 'last_name'
     
+    def get_role_display(self, obj):
+        role_colors = {
+            'contractor': '🟢 Подрядчик',
+            'guard': '🟡 Охранник',
+            'admin': '🔴 Администратор'
+        }
+        return role_colors.get(obj.role, obj.role)
+    get_role_display.short_description = "Роль"
+    
     def has_photo(self, obj):
         return bool(obj.photo)
     has_photo.boolean = True
@@ -120,17 +166,23 @@ class ContractorAdmin(UserAdmin):
     has_qr.short_description = "QR код"
     
     def save_model(self, request, obj, form, change):
-        """При сохранении проверяем пароль"""
+        """При сохранении проверяем пароль и роль"""
         if not change:  # Создание нового
-            # Если пароль не указан, устанавливаем пустой
             if not form.cleaned_data.get('password1'):
-                obj.set_password(None)
+                obj.set_unusable_password()
+        
+        # Если роль охранник или администратор - даем доступ к админке
+        if obj.role in ['guard', 'admin']:
+            obj.is_staff = True
+        else:
+            obj.is_staff = False
+        
         super().save_model(request, obj, form, change)
     
     def get_readonly_fields(self, request, obj=None):
         """Поля только для чтения"""
         if obj:  # Редактирование существующего
-            return ['created_at', 'updated_at']
+            return ['created_at', 'updated_at', 'qr_code', 'access_code']
         return []
 
 
@@ -159,10 +211,10 @@ class AccessListAdmin(admin.ModelAdmin):
 @admin.register(AccessLog)
 class AccessLogAdmin(admin.ModelAdmin):
     """Админка для логов доступа"""
-    list_display = ['contractor', 'scanned_at', 'scanned_by', 'is_successful']
-    list_filter = ['scanned_at', 'is_successful']
+    list_display = ['contractor', 'scanned_at', 'scanned_by', 'access_method', 'is_successful']
+    list_filter = ['scanned_at', 'is_successful', 'access_method']
     search_fields = ['contractor__phone_number', 'contractor__first_name', 'contractor__last_name']
-    readonly_fields = ['scanned_at', 'qr_code_scanned', 'ip_address']
+    readonly_fields = ['scanned_at', 'qr_code_scanned', 'access_code_entered', 'ip_address']
     list_per_page = 20
     
     def get_queryset(self, request):

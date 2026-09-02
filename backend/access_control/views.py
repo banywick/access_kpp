@@ -21,6 +21,121 @@ from .utils import verify_face, process_excel_file, get_today_access, generate_q
 User = get_user_model()
 
 
+# backend/access_control/views.py
+
+# backend/access_control/views.py
+
+class LoginView(APIView):
+    """
+    Вход в систему по номеру телефона
+    POST /api/login/
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        phone = request.data.get('phone_number')
+        password = request.data.get('password')  # Добавляем пароль
+        
+        if not phone:
+            return Response({
+                'success': False,
+                'error': 'Телефон обязателен'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            contractor = Contractor.objects.get(phone_number=phone)
+            
+            # Проверяем активен ли пользователь
+            if not contractor.is_active:
+                return Response({
+                    'success': False,
+                    'error': 'Доступ запрещен',
+                    'reason': 'Аккаунт деактивирован'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Для охранников и администраторов - проверяем пароль
+            if contractor.role in ['guard', 'admin']:
+                # Проверяем наличие пароля
+                if not contractor.has_usable_password():
+                    return Response({
+                        'success': False,
+                        'error': 'Доступ запрещен',
+                        'reason': 'Для входа требуется пароль. Обратитесь к администратору.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                # Проверяем пароль
+                if not password:
+                    return Response({
+                        'success': False,
+                        'error': 'Требуется пароль',
+                        'requires_password': True
+                    }, status=status.HTTP_401_UNAUTHORIZED)
+                
+                if not contractor.check_password(password):
+                    return Response({
+                        'success': False,
+                        'error': 'Неверный пароль',
+                        'requires_password': True
+                    }, status=status.HTTP_401_UNAUTHORIZED)
+                
+                # Проверяем права доступа
+                if contractor.role == 'admin' and not contractor.is_superuser:
+                    return Response({
+                        'success': False,
+                        'error': 'Доступ запрещен',
+                        'reason': 'Недостаточно прав для входа'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                # Для охранников проверяем is_staff
+                if contractor.role == 'guard' and not contractor.is_staff:
+                    contractor.is_staff = True
+                    contractor.save()
+                
+                # Возвращаем данные без проверки верификации
+                serializer = ContractorSerializer(contractor)
+                return Response({
+                    'success': True,
+                    'user_data': serializer.data,
+                    'role': contractor.role,
+                    'message': 'Вход выполнен успешно',
+                    'requires_verification': False
+                })
+            
+            # Для подрядчиков - стандартная проверка без пароля
+            else:
+                # Проверяем доступ на сегодня
+                today_access = get_today_access(contractor)
+                
+                if not today_access:
+                    return Response({
+                        'success': False,
+                        'error': 'Доступ запрещен',
+                        'reason': 'Вы не найдены в списке доступа на сегодня'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                if not today_access.is_allowed:
+                    return Response({
+                        'success': False,
+                        'error': 'Доступ запрещен',
+                        'reason': today_access.ban_reason or 'Доступ временно ограничен'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                serializer = ContractorSerializer(contractor)
+                return Response({
+                    'success': True,
+                    'user_data': serializer.data,
+                    'role': contractor.role,
+                    'message': 'Вход выполнен успешно',
+                    'requires_verification': not contractor.is_verified
+                })
+            
+        except Contractor.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Пользователь с таким номером не найден'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
 # ============ ViewSet для CRUD операций ============
 
 class ContractorViewSet(viewsets.ModelViewSet):

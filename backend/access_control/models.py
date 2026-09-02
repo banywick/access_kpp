@@ -7,7 +7,7 @@ import re
 import hashlib
 import json
 import random
-import os  # Добавляем импорт os
+import os
 
 
 class ContractorManager(BaseUserManager):
@@ -25,6 +25,7 @@ class ContractorManager(BaseUserManager):
             first_name=extra_fields.get('first_name', ''),
             last_name=extra_fields.get('last_name', ''),
             patronymic=extra_fields.get('patronymic', ''),
+            role=extra_fields.get('role', 'contractor'),
             is_active=extra_fields.get('is_active', True),
             is_staff=extra_fields.get('is_staff', False),
             is_superuser=extra_fields.get('is_superuser', False),
@@ -45,6 +46,7 @@ class ContractorManager(BaseUserManager):
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
         extra_fields.setdefault('is_verified', True)
+        extra_fields.setdefault('role', 'admin')
         
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Суперпользователь должен иметь is_staff=True.')
@@ -90,12 +92,18 @@ def upload_to_photo(instance, filename):
     """Генерация пути для сохранения фото"""
     date_path = timezone.now().strftime('%Y/%m/%d')
     ext = filename.split('.')[-1] if '.' in filename else 'jpg'
-    new_filename = f"{instance.phone_number.replace('+', '')}_{timezone.now().timestamp()}.{ext}"
+    phone_clean = instance.phone_number.replace('+', '').replace(' ', '')
+    new_filename = f"{phone_clean}_{int(timezone.now().timestamp())}.{ext}"
     return os.path.join('photos', date_path, new_filename)
 
 
 class Contractor(AbstractUser):
     """Модель подрядчика - замена стандартному User"""
+    
+    class Role(models.TextChoices):
+        CONTRACTOR = 'contractor', 'Подрядчик'
+        GUARD = 'guard', 'Охранник'
+        ADMIN = 'admin', 'Администратор'
     
     username = None
     
@@ -122,6 +130,12 @@ class Contractor(AbstractUser):
         null=True,
         verbose_name="Фото",
         max_length=500
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.CONTRACTOR,
+        verbose_name="Роль"
     )
     is_verified = models.BooleanField(
         default=False,
@@ -171,8 +185,8 @@ class Contractor(AbstractUser):
     REQUIRED_FIELDS = ['first_name', 'last_name']
     
     class Meta:
-        verbose_name = "Подрядчик"
-        verbose_name_plural = "Подрядчики"
+        verbose_name = "Пользователь"
+        verbose_name_plural = "Пользователи"
         ordering = ['-created_at']
         swappable = 'AUTH_USER_MODEL'
     
@@ -191,7 +205,7 @@ class Contractor(AbstractUser):
             'id': self.id,
             'phone': self.phone_number,
             'name': self.get_full_name(),
-            'code': self.access_code  # Добавляем код в QR
+            'code': self.access_code
         }
         self.qr_code = hashlib.sha256(
             json.dumps(data, sort_keys=True).encode()
@@ -201,12 +215,8 @@ class Contractor(AbstractUser):
     
     def generate_access_code(self):
         """Генерация уникального 4-значного кода"""
-        import random
-        
-        # Генерируем пока не найдем уникальный
         while True:
             code = str(random.randint(1000, 9999))
-            # Проверяем что код не используется
             if not Contractor.objects.filter(access_code=code).exists():
                 self.access_code = code
                 self.save(update_fields=['access_code'])

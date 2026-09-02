@@ -1,11 +1,11 @@
 <!-- frontend/src/App.vue -->
 <template>
   <div id="app">
-    <Header />
-    <main class="main-content">
+    <Header v-if="!isWelcomePage" />
+    <main class="main-content" :class="{ 'no-header': isWelcomePage }">
       <router-view />
     </main>
-    <Footer />
+    <Footer v-if="!isWelcomePage" />
   </div>
 </template>
 
@@ -18,6 +18,16 @@ export default {
   components: {
     Header,
     Footer
+  },
+  computed: {
+    isWelcomePage() {
+      return this.$route.path === '/'
+    }
+  },
+  watch: {
+    '$route.path'() {
+      // При изменении маршрута проверяем, нужно ли показывать Header/Footer
+    }
   }
 }
 </script>
@@ -48,6 +58,11 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+}
+
+.main-content.no-header {
+  padding: 0;
+  max-width: 100%;
 }
 
 /* Адаптивные отступы */

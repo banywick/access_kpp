@@ -5,12 +5,13 @@ from .views import (
     ContractorViewSet, 
     AccessListViewSet, 
     AccessLogViewSet,
+    LoginView,
     ContractorRegisterView,
     ContractorPhotoView,
     ContractorVerifyView,
     QRScanView,
     ExcelUploadView,
-    GetQRView  # Добавляем
+    GetQRView
 )
 
 router = DefaultRouter()
@@ -20,10 +21,11 @@ router.register(r'access-logs', AccessLogViewSet, basename='access-log')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('login/', LoginView.as_view(), name='login'),
     path('register/', ContractorRegisterView.as_view(), name='register'),
     path('upload-photo/', ContractorPhotoView.as_view(), name='upload-photo'),
     path('verify-photo/', ContractorVerifyView.as_view(), name='verify-photo'),
     path('scan-qr/', QRScanView.as_view(), name='scan-qr'),
     path('upload-excel/', ExcelUploadView.as_view(), name='upload-excel'),
-    path('get-qr/', GetQRView.as_view(), name='get-qr'),  # Добавляем
+    path('get-qr/', GetQRView.as_view(), name='get-qr'),
 ]

@@ -1,24 +1,34 @@
 // frontend/src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
+import WelcomeView from '../views/WelcomeView.vue'
+import ContractorView from '../views/ContractorView.vue'
+import GuardView from '../views/GuardView.vue'
+import AdminView from '../views/AdminView.vue'
 
 const routes = [
   {
     path: '/',
+    name: 'Welcome',
+    component: WelcomeView,
+    meta: { title: 'Электронный пропуск' }
+  },
+  {
+    path: '/dashboard',
     name: 'Contractor',
-    component: () => import('../views/ContractorView.vue'),
-    meta: { title: 'Подрядчик | Контроль доступа' }
+    component: ContractorView,
+    meta: { title: 'Личный кабинет | Электронный пропуск' }
   },
   {
     path: '/guard',
     name: 'Guard',
-    component: () => import('../views/GuardView.vue'),
-    meta: { title: 'Охрана | Контроль доступа' }
+    component: GuardView,
+    meta: { title: 'Охрана | Электронный пропуск' }
   },
   {
     path: '/admin',
     name: 'Admin',
-    component: () => import('../views/AdminView.vue'),
-    meta: { title: 'Админ | Контроль доступа' }
+    component: AdminView,
+    meta: { title: 'Администрирование | Электронный пропуск' }
   },
   {
     path: '/:pathMatch(.*)*',
@@ -32,7 +42,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  document.title = to.meta.title || 'Контроль доступа'
+  document.title = to.meta.title || 'Электронный пропуск'
   next()
 })
 
