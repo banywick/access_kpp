@@ -25,7 +25,7 @@ const routes = [
     meta: { title: 'Охрана | Электронный пропуск' }
   },
   {
-    path: '/admin',
+    path: '/dashboard-admin',
     name: 'Admin',
     component: AdminView,
     meta: { title: 'Администрирование | Электронный пропуск' }

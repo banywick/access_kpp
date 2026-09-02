@@ -14,8 +14,8 @@
           <span>Мой пропуск</span>
         </router-link>
         
-        <!-- Показываем для охранников и админов -->
-        <router-link v-if="userRole === 'guard' || userRole === 'admin'" to="/admin" class="nav-link" @click="closeMenu">
+        <!-- Показываем для охранников и админов - НОВЫЙ ПУТЬ -->
+        <router-link v-if="userRole === 'guard' || userRole === 'admin'" to="/dashboard-admin" class="nav-link" @click="closeMenu">
           <span class="nav-icon">🛡️</span>
           <span>Панель управления</span>
         </router-link>
