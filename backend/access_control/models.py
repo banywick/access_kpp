@@ -237,8 +237,17 @@ class Contractor(AbstractUser):
         return self.password is not None and self.password != ''
 
 
+# backend/access_control/models.py
+
 class AccessList(models.Model):
     """Список доступа на день"""
+    
+    class AccessStatus(models.TextChoices):
+        ON_TERRITORY = 'on_territory', 'На территории'
+        OFF_TERRITORY = 'off_territory', 'Не на территории'
+        TEMPORARY = 'temporary', 'Временный доступ'
+        BANNED = 'banned', 'Заблокирован'
+    
     contractor = models.ForeignKey(
         Contractor, 
         on_delete=models.CASCADE,
@@ -253,6 +262,26 @@ class AccessList(models.Model):
         default=True,
         verbose_name="Доступ разрешен"
     )
+    status = models.CharField(
+        max_length=20,
+        choices=AccessStatus.choices,
+        default=AccessStatus.OFF_TERRITORY,
+        verbose_name="Статус доступа"
+    )
+    is_on_territory = models.BooleanField(
+        default=False,
+        verbose_name="На территории"
+    )
+    last_entry_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Время последнего въезда"
+    )
+    last_exit_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Время последнего выезда"
+    )
     ban_reason = models.TextField(
         blank=True, 
         null=True,
@@ -263,12 +292,24 @@ class AccessList(models.Model):
         verbose_name="Действителен с"
     )
     valid_until = models.DateField(
-        default=default_valid_until,  # Используем функцию вместо lambda
+        default=default_valid_until,
         verbose_name="Действителен до"
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name="Дата создания"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="Дата обновления"
+    )
+    updated_by = models.ForeignKey(
+        Contractor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_access_entries',
+        verbose_name="Кто обновил"
     )
     
     class Meta:
@@ -276,15 +317,61 @@ class AccessList(models.Model):
         verbose_name_plural = "Списки доступа"
         unique_together = ['date', 'contractor']
         ordering = ['-date', 'contractor']
+        indexes = [
+            models.Index(fields=['status', 'date']),
+            models.Index(fields=['contractor', 'status']),
+            models.Index(fields=['is_on_territory']),
+        ]
     
     def __str__(self):
-        status = "✅" if self.is_allowed else "❌"
-        return f"{self.date} - {self.contractor} {status}"
+        status_display = self.get_status_display()
+        territory = "📍 На территории" if self.is_on_territory else "🚫 Не на территории"
+        return f"{self.date} - {self.contractor} ({status_display}) - {territory}"
     
     def is_valid(self):
         """Проверяет, действителен ли доступ на текущую дату"""
         today = timezone.now().date()
         return self.is_allowed and self.valid_from <= today <= self.valid_until
+    
+    def set_on_territory(self, updated_by=None):
+        """Установить статус 'На территории'"""
+        self.status = self.AccessStatus.ON_TERRITORY
+        self.is_allowed = True
+        self.is_on_territory = True
+        self.last_entry_time = timezone.now()
+        if updated_by:
+            self.updated_by = updated_by
+        self.save()
+    
+    def set_off_territory(self, updated_by=None):
+        """Установить статус 'Не на территории'"""
+        self.status = self.AccessStatus.OFF_TERRITORY
+        self.is_allowed = True
+        self.is_on_territory = False
+        self.last_exit_time = timezone.now()
+        if updated_by:
+            self.updated_by = updated_by
+        self.save()
+    
+    def set_temporary(self, days=1, updated_by=None):
+        """Установить временный доступ"""
+        self.status = self.AccessStatus.TEMPORARY
+        self.is_allowed = True
+        self.is_on_territory = False
+        self.valid_until = timezone.now().date() + timedelta(days=days)
+        if updated_by:
+            self.updated_by = updated_by
+        self.save()
+    
+    def set_banned(self, reason="", updated_by=None):
+        """Заблокировать доступ"""
+        self.status = self.AccessStatus.BANNED
+        self.is_allowed = False
+        self.is_on_territory = False
+        self.ban_reason = reason
+        if updated_by:
+            self.updated_by = updated_by
+        self.save()
 
 
 class AccessLog(models.Model):

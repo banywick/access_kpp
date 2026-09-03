@@ -1,0 +1,260 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .import-container {
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .import-header {
+        border-bottom: 2px solid #f0f0f0;
+        padding-bottom: 15px;
+        margin-bottom: 20px;
+    }
+    .import-header h1 {
+        font-size: 24px;
+        font-weight: 600;
+        color: #333;
+    }
+    .import-header .subtitle {
+        color: #666;
+        font-size: 14px;
+        margin-top: 5px;
+    }
+    .upload-area {
+        border: 2px dashed #ddd;
+        border-radius: 8px;
+        padding: 40px;
+        text-align: center;
+        transition: all 0.3s;
+        cursor: pointer;
+        background: #fafafa;
+    }
+    .upload-area:hover {
+        border-color: #79aec8;
+        background: #f8f9fa;
+    }
+    .upload-area.dragover {
+        border-color: #79aec8;
+        background: #e8f0fe;
+    }
+    .upload-icon {
+        font-size: 48px;
+        color: #79aec8;
+        margin-bottom: 15px;
+    }
+    .upload-text {
+        font-size: 16px;
+        color: #666;
+    }
+    .upload-hint {
+        font-size: 14px;
+        color: #999;
+        margin-top: 10px;
+    }
+    .file-input-wrapper {
+        margin: 20px 0;
+    }
+    .file-input-wrapper input[type="file"] {
+        display: none;
+    }
+    .btn-upload {
+        background: #79aec8;
+        color: white;
+        border: none;
+        padding: 10px 30px;
+        border-radius: 4px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.3s;
+    }
+    .btn-upload:hover {
+        background: #609ab6;
+    }
+    .btn-upload:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .requirements {
+        margin-top: 30px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 4px solid #79aec8;
+    }
+    .requirements h3 {
+        font-size: 16px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+    }
+    .requirements ul {
+        margin: 0;
+        padding-left: 20px;
+    }
+    .requirements ul li {
+        margin: 5px 0;
+        color: #555;
+    }
+    .requirements .example {
+        background: #fff;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 10px;
+        font-family: monospace;
+        font-size: 13px;
+        border: 1px solid #ddd;
+    }
+    .messages {
+        margin: 20px 0;
+    }
+    .messages .messagelist {
+        margin: 0;
+        padding: 0;
+    }
+    .messages .messagelist li {
+        list-style: none;
+        padding: 10px 15px;
+        border-radius: 4px;
+        margin-bottom: 5px;
+    }
+    .messages .messagelist li.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .messages .messagelist li.warning {
+        background: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeeba;
+    }
+    .messages .messagelist li.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    .messages .messagelist li.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="import-container">
+    <div class="import-header">
+        <h1>📥 Импорт подрядчиков из Excel</h1>
+        <div class="subtitle">Загрузите Excel файл для массового добавления подрядчиков</div>
+    </div>
+
+    {% if messages %}
+    <div class="messages">
+        <ul class="messagelist">
+            {% for message in messages %}
+            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>
+                {{ message|linebreaksbr }}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" action="{% url 'admin:process_excel' %}">
+        {% csrf_token %}
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">Перетащите Excel файл сюда или нажмите для выбора</div>
+            <div class="upload-hint">Поддерживаются файлы .xlsx и .xls</div>
+            <div class="file-input-wrapper">
+                <input type="file" name="excel_file" id="excelFile" accept=".xlsx,.xls" required>
+                <label for="excelFile" class="btn btn-upload" id="fileLabel">
+                    Выбрать файл
+                </label>
+                <span id="fileName" style="margin-left: 10px; color: #666;"></span>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="submit" class="btn btn-upload" style="padding: 12px 50px; font-size: 18px;">
+                📊 Начать импорт
+            </button>
+        </div>
+    </form>
+
+    <div class="requirements">
+        <h3>📋 Требования к файлу:</h3>
+        <ul>
+            <li><strong>Обязательные колонки:</strong> Телефон, Имя, Фамилия, Организация</li>
+            <li><strong>Опциональные колонки:</strong> Отчество</li>
+            <li><strong>Формат телефона:</strong> +375291234567, 80291234567, 291234567</li>
+            <li><strong>Дубликаты:</strong> Существующие пользователи будут пропущены</li>
+            <li><strong>Кодировка:</strong> UTF-8</li>
+        </ul>
+        <div class="example">
+            <strong>Пример структуры Excel:</strong><br>
+            | Телефон      | Имя    | Фамилия   | Отчество | Организация    |<br>
+            | 375291234567 | Иван   | Иванов    | Иванович | ООО "Ромашка"  |<br>
+            | 802912345678 | Петр   | Петров    | Петрович | ЗАО "Луч"      |
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('excelFile');
+    const fileName = document.getElementById('fileName');
+    const fileLabel = document.getElementById('fileLabel');
+
+    // Клик по области загрузки
+    uploadArea.addEventListener('click', function() {
+        fileInput.click();
+    });
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        this.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        this.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.classList.remove('dragover');
+        
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            updateFileName(fileInput.files[0]);
+        }
+    });
+
+    // Выбор файла
+    fileInput.addEventListener('change', function() {
+        if (this.files.length) {
+            updateFileName(this.files[0]);
+        }
+    });
+
+    function updateFileName(file) {
+        if (file) {
+            const size = (file.size / 1024).toFixed(1);
+            fileName.textContent = `${file.name} (${size} KB)`;
+            fileLabel.style.background = '#28a745';
+            fileLabel.textContent = '✅ Файл выбран';
+        }
+    }
+});
+</script>
+{% endblock %}
