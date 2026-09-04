@@ -401,48 +401,53 @@ export default {
     },
     
     async processAccess(type) {
-      this.isProcessing = true
-      this.actionResult = null
-      
-      try {
+    this.isProcessing = true
+    this.actionResult = null
+    
+    try {
         const csrfToken = this.getCsrfToken()
         
-        // Отправляем запрос с данными охранника
-        const response = await axios.post('/api/scan-qr/', {
-          access_code: this.contractorData?.access_code,
-          access_type: type,
-          guard_phone: this.currentUser?.phone_number, // Передаем телефон охранника
-          guard_name: this.currentUser?.full_name // Передаем имя охранника
-        }, {
-          headers: { 'X-CSRFToken': csrfToken }
+        // Собираем данные для отправки
+        const requestData = {
+            access_code: this.contractorData?.access_code,
+            access_type: type,
+            guard_id: this.currentUser?.id,  // Используем ID вместо телефона
+            guard_phone: this.currentUser?.phone_number,
+            guard_name: this.currentUser?.full_name
+        }
+        
+        console.log('Process access request:', requestData)
+        
+        const response = await axios.post('/api/scan-qr/', requestData, {
+            headers: { 'X-CSRFToken': csrfToken }
         })
         
         console.log('Process access response:', response.data)
         
         if (response.data.success) {
-          this.isOnTerritory = response.data.is_on_territory || false
-          if (response.data.contractor) {
-            this.contractorData = response.data.contractor
-          }
-          if (response.data.valid_until) {
-            this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
-          }
-          this.actionResult = {
-            success: true,
-            message: response.data.message || 'Операция выполнена успешно'
-          }
+            this.isOnTerritory = response.data.is_on_territory || false
+            if (response.data.contractor) {
+                this.contractorData = response.data.contractor
+            }
+            if (response.data.valid_until) {
+                this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
+            }
+            this.actionResult = {
+                success: true,
+                message: response.data.message || 'Операция выполнена успешно'
+            }
         }
-      } catch (error) {
+    } catch (error) {
         console.error('Process access error:', error.response?.data)
         const errorData = error.response?.data || {}
         this.actionResult = {
-          success: false,
-          message: errorData.message || errorData.reason || 'Ошибка операции'
+            success: false,
+            message: errorData.message || errorData.reason || 'Ошибка операции'
         }
-      } finally {
+    } finally {
         this.isProcessing = false
-      }
-    },
+    }
+},
     
     showError(message) {
       this.scanError = true

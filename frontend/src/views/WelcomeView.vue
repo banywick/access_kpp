@@ -20,7 +20,7 @@
 
         <div class="auth-section">
           <h2>Вход в систему</h2>
-          <p class="auth-hint">Введите номер телефона для входа</p>
+          <p class="auth-hint">{{ authHint }}</p>
 
           <form @submit.prevent="submitPhone" class="auth-form">
             <div class="phone-input-wrapper">
@@ -43,7 +43,7 @@
               {{ phoneError }}
             </div>
 
-            <!-- Поле для пароля (показывается только когда нужно) -->
+            <!-- Поле для пароля (только для охранников и админов) -->
             <div v-if="showPasswordField" class="password-input-wrapper">
               <input
                 v-model="password"
@@ -53,6 +53,7 @@
                 :disabled="isLoading"
                 required
               />
+              <span class="password-hint">* Для сотрудников охраны и администраторов</span>
             </div>
 
             <!-- Согласие на обработку данных -->
@@ -79,13 +80,26 @@
               :disabled="!isPhoneValid || !consentGiven || isLoading || (showPasswordField && !password)"
             >
               <span v-if="isLoading" class="btn-spinner"></span>
-              <span v-else>Войти</span>
+              <span v-else>{{ buttonText }}</span>
             </button>
           </form>
 
           <div v-if="error" class="error-message">
             <span class="error-icon">⚠️</span>
             {{ error }}
+          </div>
+          
+          <!-- Информация о типе входа -->
+          <div v-if="userRole" class="auth-info">
+            <p v-if="userRole === 'guard'" class="role-info guard">
+              🛡️ Вход для сотрудников охраны
+            </p>
+            <p v-else-if="userRole === 'admin'" class="role-info admin">
+              👑 Вход для администраторов
+            </p>
+            <p v-else-if="userRole === 'contractor'" class="role-info contractor">
+              📱 Вход для подрядчиков
+            </p>
           </div>
         </div>
 
@@ -147,9 +161,14 @@
 <script>
 import axios from 'axios'
 
-axios.defaults.xsrfCookieName = 'csrftoken'
-axios.defaults.xsrfHeaderName = 'X-CSRFToken'
-axios.defaults.withCredentials = true
+// Создаем экземпляр axios
+const api = axios.create({
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: true,
+})
 
 export default {
   name: 'WelcomeView',
@@ -163,7 +182,8 @@ export default {
       phoneError: null,
       consentGiven: false,
       showPrivacyPolicy: false,
-      showPasswordField: false
+      showPasswordField: false,
+      userRole: null, // 'contractor', 'guard', 'admin'
     }
   },
   computed: {
@@ -178,6 +198,17 @@ export default {
       if (!this.phoneRaw) return false
       const cleaned = this.phoneRaw.replace(/\D/g, '')
       return cleaned.length === 9
+    },
+    authHint() {
+      if (this.showPasswordField) {
+        return 'Введите номер телефона и пароль для входа'
+      }
+      return 'Введите номер телефона для входа в систему'
+    },
+    buttonText() {
+      if (this.isLoading) return 'Загрузка...'
+      if (this.showPasswordField) return 'Войти'
+      return 'Продолжить'
     }
   },
   methods: {
@@ -265,65 +296,160 @@ export default {
       const phoneToSend = this.fullPhoneNumber
       
       try {
-        const payload = { phone_number: phoneToSend }
-        if (this.showPasswordField) {
-          payload.password = this.password
+        // ШАГ 1: Проверяем пользователя
+        console.log('Checking user:', { phone_number: phoneToSend })
+        
+        const checkResponse = await api.post('/check-user/', {
+          phone_number: phoneToSend
+        })
+        
+        console.log('Check response:', checkResponse.data)
+        
+        if (!checkResponse.data.exists) {
+          this.error = 'Пользователь не найден. Обратитесь к администратору.'
+          this.isLoading = false
+          return
         }
         
-        const response = await axios.post('/api/login/', payload)
+        const role = checkResponse.data.role
         
-        if (response.data.success) {
-          localStorage.setItem('userData', JSON.stringify(response.data.user_data))
-          localStorage.setItem('userRole', response.data.role)
-          localStorage.setItem('isAuthenticated', 'true')
-          
-          // Редирект в зависимости от роли
-          if (response.data.role === 'guard' || response.data.role === 'admin') {
-            this.$router.push('/dashboard-admin')  // Новый путь
-          } else {
-            this.$router.push('/dashboard')
+        // ШАГ 2: Если охранник или админ - запрашиваем пароль
+        if (role === 'guard' || role === 'admin') {
+          if (!this.showPasswordField) {
+            this.showPasswordField = true
+            this.userRole = role
+            this.isLoading = false
+            this.error = null
+            this.$nextTick(() => {
+              const input = document.querySelector('.password-input')
+              if (input) input.focus()
+            })
+            return
           }
+          
+          // Проверяем пароль
+          console.log('Login with password:', { phone_number: phoneToSend })
+          
+          const loginResponse = await api.post('/login/', {
+            phone_number: phoneToSend,
+            password: this.password
+          })
+          
+          console.log('Login response:', loginResponse.data)
+          
+          if (loginResponse.data.success) {
+            this.handleLoginSuccess(loginResponse.data, role)
+          } else {
+            this.error = loginResponse.data.message || 'Ошибка входа'
+          }
+          
+        } else if (role === 'contractor') {
+          // ШАГ 3: Подрядчик - вход без пароля
+          this.userRole = role
+          
+          console.log('Contractor login:', { phone_number: phoneToSend })
+          
+          const contractorResponse = await api.post('/contractor-login/', {
+            phone_number: phoneToSend
+          })
+          
+          console.log('Contractor response:', contractorResponse.data)
+          
+          if (contractorResponse.data.success) {
+            this.handleLoginSuccess(contractorResponse.data, role)
+          } else {
+            this.error = contractorResponse.data.message || 'Ошибка входа'
+          }
+          
         } else {
-          this.error = response.data.error || 'Ошибка входа'
+          this.error = 'Неизвестная роль пользователя'
         }
+        
       } catch (error) {
         console.error('Login error:', error)
         
         if (error.response) {
           const errorData = error.response.data
+          console.error('Error response:', errorData)
           
-          if (errorData.requires_password) {
-            this.showPasswordField = true
-            this.error = errorData.error || 'Введите пароль'
-            this.password = ''
+          if (error.response.status === 404) {
+            this.error = 'Пользователь не найден'
+          } else if (error.response.status === 403) {
+            this.error = errorData.message || 'Доступ запрещен'
+          } else if (error.response.status === 401) {
+            if (errorData.requires_password) {
+              this.showPasswordField = true
+              this.userRole = 'guard'
+              this.error = errorData.message || 'Введите пароль'
+              this.isLoading = false
+              return
+            }
+            this.error = errorData.message || 'Неверный телефон или пароль'
           } else {
-            this.error = errorData.error || errorData.reason || 'Ошибка сервера'
+            this.error = errorData.message || 'Ошибка сервера'
           }
+        } else if (error.request) {
+          this.error = 'Сервер не отвечает. Проверьте подключение.'
         } else {
-          this.error = 'Ошибка соединения с сервером'
+          this.error = 'Ошибка при отправке запроса'
         }
       } finally {
         this.isLoading = false
       }
     },
     
+    handleLoginSuccess(data, role) {
+      // Сохраняем JWT токены
+      if (data.tokens) {
+        localStorage.setItem('access_token', data.tokens.access)
+        localStorage.setItem('refresh_token', data.tokens.refresh)
+      }
+      
+      // Сохраняем данные пользователя
+      if (data.user) {
+        localStorage.setItem('userData', JSON.stringify(data.user))
+        localStorage.setItem('userRole', role || data.user.role || 'contractor')
+      }
+      
+      localStorage.setItem('isAuthenticated', 'true')
+      
+      // Редирект в зависимости от роли
+      if (role === 'guard' || role === 'admin') {
+        this.$router.push('/dashboard-admin')
+      } else {
+        this.$router.push('/dashboard')
+      }
+    },
+    
     acceptPrivacy() {
       this.showPrivacyPolicy = false
       this.consentGiven = true
+    },
+    
+    resetForm() {
+      this.showPasswordField = false
+      this.password = ''
+      this.userRole = null
+      this.error = null
     }
   },
   watch: {
     phoneRaw() {
       this.validatePhone()
+      // При изменении номера сбрасываем состояние
+      if (this.showPasswordField) {
+        this.resetForm()
+      }
     }
   },
   mounted() {
+    // Проверяем, авторизован ли пользователь
     const isAuth = localStorage.getItem('isAuthenticated')
     const userRole = localStorage.getItem('userRole')
     
     if (isAuth === 'true') {
       if (userRole === 'guard' || userRole === 'admin') {
-        this.$router.push('/dashboard-admin')  // Новый путь
+        this.$router.push('/dashboard-admin')
       } else {
         this.$router.push('/dashboard')
       }
@@ -338,7 +464,6 @@ export default {
 </script>
 
 <style scoped>
-/* Стили остаются без изменений */
 * {
   margin: 0;
   padding: 0;
@@ -500,37 +625,29 @@ export default {
 
 .password-input-wrapper {
   display: flex;
-  align-items: center;
-  border: 2px solid #e0e0e0;
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.3s, box-shadow 0.3s;
-  background: white;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.password-input-wrapper:focus-within {
+.password-input-wrapper .password-input {
+  padding: 14px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 18px;
+  outline: none;
+  background: white;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.password-input-wrapper .password-input:focus {
   border-color: #1a237e;
   box-shadow: 0 0 0 4px rgba(26, 35, 126, 0.1);
 }
 
-.password-input {
-  flex: 1;
-  padding: 14px 16px;
-  border: none;
-  font-size: 18px;
-  outline: none;
-  background: transparent;
-  min-width: 0;
-}
-
-.password-input::placeholder {
-  color: #bbb;
-  font-size: 16px;
-}
-
-.password-input:disabled {
-  opacity: 0.7;
-  background: #f5f5f5;
+.password-hint {
+  font-size: 12px;
+  color: #999;
+  padding-left: 4px;
 }
 
 .field-error {
@@ -660,6 +777,31 @@ export default {
   align-items: center;
   gap: 10px;
   font-size: 14px;
+}
+
+.auth-info {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.role-info {
+  margin: 0;
+  font-size: 13px;
+  text-align: center;
+}
+
+.role-info.guard {
+  color: #0d47a1;
+}
+
+.role-info.admin {
+  color: #6a1b9a;
+}
+
+.role-info.contractor {
+  color: #2e7d32;
 }
 
 .info-links {

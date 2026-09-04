@@ -1,135 +1,386 @@
 <!-- frontend/src/views/ContractorView.vue -->
 <template>
   <div class="contractor-view">
-    <div class="contractor-container">
-      <!-- Шаг 1: Ввод телефона (редирект на Welcome) -->
-      <div v-if="step === 'phone'" class="redirect-message">
-        <div class="redirect-icon">🔄</div>
-        <h2>Перенаправление...</h2>
-        <p>Пожалуйста, используйте главную страницу для входа</p>
-        <button class="go-home-btn" @click="goHome">На главную</button>
+    <!-- Шапка -->
+    <header class="header">
+      <div class="header-content">
+        <div class="logo-section">
+          <span class="logo-icon">🏢</span>
+          <h1 class="logo-text">Электронный пропуск</h1>
+        </div>
+        <div class="user-section">
+          <span class="user-name">{{ user.full_name || user.phone }}</span>
+          <button @click="logout" class="logout-btn">Выйти</button>
+        </div>
       </div>
-      
-      <!-- Шаг 2: Загрузка фото (только для подрядчиков) -->
-      <PhotoUpload
-        v-else-if="step === 'photo'"
-        :phone-number="phoneNumber"
-        :user-data="userData"
-        @verified="onPhotoVerified"
-        @skip="onSkipPhoto"
-      />
-      
-      <!-- Шаг 3: Личный кабинет с QR кодом (только для подрядчиков) -->
-      <ContractorDashboard
-        v-else-if="step === 'dashboard'"
-        :user-data="userData"
-        :qr-data="qrData"
-        @logout="onLogout"
-        @go-to-photo="step = 'photo'"
-      />
-      
-      <!-- Загрузка -->
-      <div v-else class="loading-container">
-        <div class="spinner"></div>
-        <p>Загрузка...</p>
+    </header>
+
+    <!-- Основной контент -->
+    <main class="main-content">
+      <div class="container">
+        <!-- Статус верификации -->
+        <div class="status-card" :class="{ verified: user.is_verified }">
+          <div class="status-icon">
+            {{ user.is_verified ? '✅' : '⏳' }}
+          </div>
+          <div class="status-text">
+            <h3>{{ user.is_verified ? 'Верификация пройдена' : 'Ожидает верификации' }}</h3>
+            <p v-if="!user.is_verified">
+              Пожалуйста, загрузите свое фото для верификации
+            </p>
+            <p v-else>
+              Ваш аккаунт верифицирован. Используйте QR код для доступа
+            </p>
+          </div>
+        </div>
+
+        <!-- Загрузка фото -->
+        <div v-if="!user.is_verified" class="photo-upload-card">
+          <h3>📸 Загрузите фото для верификации</h3>
+          <p class="upload-hint">Загрузите свое фото для идентификации</p>
+          
+          <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
+            <input 
+              type="file" 
+              ref="fileInput" 
+              @change="handleFileSelect" 
+              accept="image/*"
+              style="display: none"
+            />
+            <div v-if="!previewImage" class="upload-placeholder" @click="$refs.fileInput.click()">
+              <span class="upload-icon">📷</span>
+              <p>Нажмите или перетащите фото сюда</p>
+              <small>Поддерживаются JPG, PNG, WEBP</small>
+            </div>
+            <div v-else class="upload-preview" @click="$refs.fileInput.click()">
+              <img :src="previewImage" alt="Preview" />
+              <div class="preview-overlay">
+                <span>Изменить фото</span>
+              </div>
+            </div>
+          </div>
+
+          <button 
+            @click="uploadPhoto" 
+            :disabled="!previewImage || uploading"
+            class="upload-btn"
+          >
+            {{ uploading ? 'Загрузка...' : 'Отправить на верификацию' }}
+          </button>
+          
+          <div v-if="uploadError" class="error-message">
+            {{ uploadError }}
+          </div>
+        </div>
+
+        <!-- QR код и код доступа -->
+        <div v-if="user.is_verified" class="qr-section">
+          <div class="qr-card">
+            <h3>📱 Ваш QR код</h3>
+            <p class="qr-hint">Покажите этот QR код охраннику для входа</p>
+            
+            <div class="qr-container">
+              <div v-if="qrLoading" class="qr-loading">
+                <div class="spinner"></div>
+                <p>Загрузка QR кода...</p>
+              </div>
+              <div v-else-if="qrError" class="qr-error">
+                <span class="error-icon">❌</span>
+                <p>{{ qrError }}</p>
+                <button @click="loadQRCode" class="retry-btn">Повторить</button>
+              </div>
+              <div v-else-if="qrCode" class="qr-display">
+                <div class="qr-image-wrapper">
+                  <img 
+                    :src="qrCodeImageUrl" 
+                    alt="QR Code"
+                    class="qr-image"
+                    @error="handleQRError"
+                  />
+                </div>
+                <div class="access-code">
+                  <span class="code-label">Код доступа:</span>
+                  <span class="code-value">{{ accessCode }}</span>
+                  <button @click="copyAccessCode" class="copy-btn">
+                    {{ copied ? '✅' : '📋' }}
+                  </button>
+                </div>
+                <p class="code-hint">Используйте этот код для входа через КПП</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Информация о доступе -->
+          <div class="access-info-card">
+            <h3>📋 Информация о доступе</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-label">Статус</span>
+                <span class="info-value status-active">
+                  ✅ Активен
+                </span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Организация</span>
+                <span class="info-value">{{ user.organization || 'Не указана' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Телефон</span>
+                <span class="info-value">{{ user.phone }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script>
-import PhotoUpload from '../components/contractor/PhotoUpload.vue'
-import ContractorDashboard from '../components/contractor/ContractorDashboard.vue'
 import axios from 'axios'
+
+// Создаем экземпляр axios
+const api = axios.create({
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: true,
+})
+
+// Интерцептор для добавления токена
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Интерцептор для обработки 401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('userData')
+      localStorage.removeItem('userRole')
+      localStorage.removeItem('isAuthenticated')
+      window.location.href = '/'
+    }
+    return Promise.reject(error)
+  }
+)
 
 export default {
   name: 'ContractorView',
-  components: {
-    PhotoUpload,
-    ContractorDashboard
-  },
   data() {
     return {
-      step: 'loading',
-      phoneNumber: null,
-      userData: null,
-      qrData: null
+      user: {
+        full_name: '',
+        phone: '',
+        is_verified: false,
+        organization: '',
+        role: 'contractor'
+      },
+      previewImage: null,
+      selectedFile: null,
+      uploading: false,
+      uploadError: null,
+      qrCode: null,
+      accessCode: null,
+      qrLoading: false,
+      qrError: null,
+      copied: false
+    }
+  },
+  computed: {
+    qrCodeImageUrl() {
+      if (!this.qrCode) return ''
+      // Используем наш бэкенд для генерации QR кода
+      return `http://localhost:8000/api/get-qr/?code=${this.qrCode}`
     }
   },
   mounted() {
-    // Проверяем авторизацию
-    const isAuth = localStorage.getItem('isAuthenticated')
-    const userRole = localStorage.getItem('userRole')
-    const userDataStr = localStorage.getItem('userData')
+    // Загружаем данные пользователя из localStorage
+    const userData = localStorage.getItem('userData')
+    if (userData) {
+      this.user = JSON.parse(userData)
+    }
     
-    if (isAuth === 'true' && userDataStr) {
-      try {
-        this.userData = JSON.parse(userDataStr)
-        this.phoneNumber = this.userData.phone_number
-        
-        // Проверяем роль - если охранник или админ, редирект на админку
-        if (userRole === 'guard' || userRole === 'admin') {
-          this.$router.push('/admin')
-          return
-        }
-        
-        // Только для подрядчиков
-        // Если верифицирован - показываем дашборд
-        if (this.userData.is_verified && this.userData.qr_code) {
-          this.step = 'dashboard'
-          this.loadQRCode()
-        } else {
-          this.step = 'photo'
-        }
-      } catch (e) {
-        this.goHome()
-      }
-    } else {
-      this.goHome()
+    // Загружаем QR код
+    if (this.user.is_verified) {
+      this.loadQRCode()
     }
   },
   methods: {
-    goHome() {
-      this.$router.push('/')
-    },
-    
-    onPhotoVerified(data) {
-      console.log('Photo verified:', data)
-      this.qrData = data
-      this.userData = data.contractor || this.userData
-      
-      // Обновляем данные в localStorage
-      if (this.userData) {
-        localStorage.setItem('userData', JSON.stringify(this.userData))
-      }
-      
-      this.step = 'dashboard'
-    },
-    
-    onSkipPhoto() {
-      if (this.userData && this.userData.is_verified) {
-        this.loadQRCode()
-        this.step = 'dashboard'
-      } else {
-        this.step = 'photo'
-      }
-    },
-    
     async loadQRCode() {
+      this.qrLoading = true
+      this.qrError = null
+      
       try {
-        const response = await axios.post('/api/get-qr/', {
-          phone_number: this.phoneNumber
-        })
-        this.qrData = response.data
+        const response = await api.get('/get-qr/')
+        console.log('QR Response:', response.data)
+        
+        if (response.data.success) {
+          this.qrCode = response.data.qr_code
+          this.accessCode = response.data.access_code
+          
+          // Обновляем данные пользователя
+          this.user = {
+            ...this.user,
+            ...response.data
+          }
+          
+          // Сохраняем обновленные данные
+          localStorage.setItem('userData', JSON.stringify(this.user))
+        } else {
+          this.qrError = response.data.message || 'Ошибка загрузки QR кода'
+        }
       } catch (error) {
-        console.error('Ошибка загрузки QR:', error)
+        console.error('Error loading QR:', error)
+        
+        if (error.response?.status === 401) {
+          this.qrError = 'Сессия истекла. Пожалуйста, войдите заново.'
+          setTimeout(() => {
+            this.$router.push('/')
+          }, 3000)
+        } else {
+          this.qrError = error.response?.data?.message || 'Ошибка загрузки QR кода'
+        }
+      } finally {
+        this.qrLoading = false
       }
     },
     
-    onLogout() {
-      localStorage.removeItem('isAuthenticated')
-      localStorage.removeItem('userRole')
+    handleFileSelect(event) {
+      const file = event.target.files[0]
+      if (file) {
+        this.processFile(file)
+      }
+    },
+    
+    handleDrop(event) {
+      const file = event.dataTransfer.files[0]
+      if (file) {
+        this.processFile(file)
+      }
+    },
+    
+    processFile(file) {
+      if (!file.type.startsWith('image/')) {
+        this.uploadError = 'Пожалуйста, загрузите изображение'
+        return
+      }
+      
+      if (file.size > 5 * 1024 * 1024) {
+        this.uploadError = 'Размер файла не должен превышать 5MB'
+        return
+      }
+      
+      this.selectedFile = file
+      this.uploadError = null
+      
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        this.previewImage = e.target.result
+      }
+      reader.readAsDataURL(file)
+    },
+    
+    async uploadPhoto() {
+      if (!this.selectedFile) {
+        this.uploadError = 'Выберите файл для загрузки'
+        return
+      }
+      
+      this.uploading = true
+      this.uploadError = null
+      
+      const formData = new FormData()
+      formData.append('photo', this.selectedFile)
+      
+      try {
+        const response = await api.post('/upload-photo/', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          }
+        })
+        
+        console.log('Upload response:', response.data)
+        
+        if (response.data.success) {
+          // Обновляем статус пользователя
+          this.user.is_verified = true
+          this.user.photo = response.data.photo_url
+          
+          // Сохраняем в localStorage
+          localStorage.setItem('userData', JSON.stringify(this.user))
+          
+          // Загружаем QR код
+          await this.loadQRCode()
+          
+          this.uploadError = null
+          this.previewImage = null
+          this.selectedFile = null
+          
+          // Показываем уведомление об успехе
+          alert('✅ Фото успешно загружено! QR код теперь доступен.')
+        } else {
+          this.uploadError = response.data.message || 'Ошибка загрузки фото'
+        }
+      } catch (error) {
+        console.error('Upload error:', error)
+        this.uploadError = error.response?.data?.message || 'Ошибка загрузки фото'
+      } finally {
+        this.uploading = false
+      }
+    },
+    
+    handleQRError(event) {
+      console.error('QR image error:', event)
+      // Если не загрузился через внешний API, пробуем через наш бэкенд
+      if (this.qrCode) {
+        // Просто показываем код доступа
+        this.qrError = 'Не удалось загрузить QR код, но код доступа доступен ниже'
+      }
+    },
+    
+    copyAccessCode() {
+      if (!this.accessCode) return
+      
+      navigator.clipboard.writeText(this.accessCode).then(() => {
+        this.copied = true
+        setTimeout(() => {
+          this.copied = false
+        }, 2000)
+      }).catch(() => {
+        // Fallback
+        const input = document.createElement('input')
+        input.value = this.accessCode
+        document.body.appendChild(input)
+        input.select()
+        document.execCommand('copy')
+        document.body.removeChild(input)
+        this.copied = true
+        setTimeout(() => {
+          this.copied = false
+        }, 2000)
+      })
+    },
+    
+    logout() {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
       localStorage.removeItem('userData')
+      localStorage.removeItem('userRole')
+      localStorage.removeItem('isAuthenticated')
       this.$router.push('/')
     }
   }

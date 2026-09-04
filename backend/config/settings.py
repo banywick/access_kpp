@@ -1,6 +1,7 @@
 # backend/config/settings.py
 import os
 from pathlib import Path
+from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -18,6 +19,7 @@ INSTALLED_APPS = [
     
     # Third party
     'rest_framework',
+    'rest_framework_simplejwt',  # <-- Добавляем JWT
     'corsheaders',
     # 'rest_framework.authtoken'
     
@@ -33,7 +35,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Должен быть выше CommonMiddleware
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    # 'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -106,10 +108,10 @@ CORS_ALLOWED_ORIGINS = [
     'http://frontend:5173',
 ]
 
-CORS_ALLOWED_ORIGIN_REGEXES = [
-    r'^http://localhost:\d+$',
-    r'^http://127.0.0.1:\d+$',
-]
+# CORS_ALLOWED_ORIGIN_REGEXES = [
+#     r'^http://localhost:\d+$',
+#     r'^http://127.0.0.1:\d+$',
+# ]
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -132,27 +134,51 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
-# CSRF Settings
+# # CSRF Settings
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://frontend:5173',
 ]
 
-# Если не используете CSRF для API
-CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_HTTPONLY = False
-CSRF_USE_SESSIONS = False
+# # Если не используете CSRF для API
+# CSRF_COOKIE_SAMESITE = 'Lax'
+# CSRF_COOKIE_HTTPONLY = False
+# CSRF_USE_SESSIONS = False
 
-# REST Framework
+# ========== REST Framework настройки ==========
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.BasicAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT аутентификация
+        # 'rest_framework.authentication.SessionAuthentication',  # Для админки
+        # 'rest_framework.authentication.BasicAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.AllowAny',  # Для разработки
+        'rest_framework.permissions.IsAuthenticated',  # По умолчанию все API требуют авторизации
     ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+# ========== JWT настройки ==========
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),  # Токен доступа живет 1 день
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # Токен обновления живет 7 дней
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,  # Используем секретный ключ Django
+    'VERIFYING_KEY': None,
+    'AUDIENCE': None,
+    'ISSUER': None,
+    'AUTH_HEADER_TYPES': ('Bearer',),  # Заголовок: Authorization: Bearer <token>
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(days=1),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=7),
 }
 
 # Custom User Model
