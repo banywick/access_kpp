@@ -39,9 +39,11 @@ class ContractorManager(BaseUserManager):
             is_verified=extra_fields.get('is_verified', False),
         )
         
+        # Пароль устанавливается только если он передан
         if password:
             user.set_password(password)
         else:
+            # Для подрядчиков пароль не нужен
             user.set_unusable_password()
         
         user.save(using=self._db)
@@ -213,6 +215,9 @@ class Contractor(AbstractUser):
         return f"{self.first_name} {self.last_name}".strip()
     
     def generate_qr_code(self):
+        """Генерация QR кода (только для верифицированных)"""
+        if not self.is_verified:
+            return None
         data = {
             'id': self.id,
             'phone': self.phone_number,
@@ -226,6 +231,9 @@ class Contractor(AbstractUser):
         return self.qr_code
     
     def generate_access_code(self):
+        """Генерация кода доступа (только для верифицированных)"""
+        if not self.is_verified:
+            return None
         while True:
             code = str(random.randint(1000, 9999))
             if not Contractor.objects.filter(access_code=code).exists():
@@ -233,11 +241,45 @@ class Contractor(AbstractUser):
                 self.save(update_fields=['access_code'])
                 return code
     
+    def verify_user(self):
+        """Верификация пользователя с созданием доступа"""
+        if self.is_verified:
+            return False
+        
+        self.is_verified = True
+        
+        # Генерируем коды
+        self.generate_access_code()
+        self.generate_qr_code()
+        
+        # Создаем или обновляем запись в списке доступа
+        today = timezone.now().date()
+        access, created = AccessList.objects.get_or_create(
+            contractor=self,
+            date=today,
+            defaults={
+                'is_allowed': True,
+                'status': AccessList.AccessStatus.OFF_TERRITORY,
+                'valid_from': today,
+                'valid_until': today + timedelta(days=30)
+            }
+        )
+        
+        # Если запись уже существовала, обновляем её
+        if not created:
+            access.is_allowed = True
+            access.status = AccessList.AccessStatus.OFF_TERRITORY
+            access.valid_from = today
+            access.valid_until = today + timedelta(days=30)
+            access.ban_reason = None
+            access.save()
+        
+        self.save()
+        return True
+    
     def has_usable_password(self):
         return self.password is not None and self.password != ''
 
-
-# backend/access_control/models.py
 
 class AccessList(models.Model):
     """Список доступа на день"""
@@ -342,6 +384,9 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
+        
+        # Синхронизируем статус с Contractor
+        self.sync_with_contractor()
     
     def set_off_territory(self, updated_by=None):
         """Установить статус 'Не на территории'"""
@@ -352,6 +397,9 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
+        
+        # Синхронизируем статус с Contractor
+        self.sync_with_contractor()
     
     def set_temporary(self, days=1, updated_by=None):
         """Установить временный доступ"""
@@ -362,6 +410,9 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
+        
+        # Синхронизируем статус с Contractor
+        self.sync_with_contractor()
     
     def set_banned(self, reason="", updated_by=None):
         """Заблокировать доступ"""
@@ -372,6 +423,22 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
+        
+        # Синхронизируем статус с Contractor
+        self.sync_with_contractor()
+    
+    def sync_with_contractor(self):
+        """Синхронизирует статус с моделью Contractor"""
+        contractor = self.contractor
+        
+        # Если доступ разрешен - подрядчик верифицирован
+        if self.is_allowed:
+            contractor.is_verified = True
+        else:
+            contractor.is_verified = False
+        
+        # Сохраняем только поле is_verified
+        contractor.save(update_fields=['is_verified'])
 
 
 class AccessLog(models.Model):

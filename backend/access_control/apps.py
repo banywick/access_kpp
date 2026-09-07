@@ -1,7 +1,10 @@
+# backend/access_control/apps.py
 from django.apps import AppConfig
 
 
 class AccessControlConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'access_control'
-    verbose_name = 'Управление доступом'
+    verbose_name = 'Контроль доступа'
+    
+   
