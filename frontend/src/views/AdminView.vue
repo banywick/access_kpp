@@ -379,13 +379,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-axios.defaults.xsrfCookieName = 'csrftoken'
-axios.defaults.xsrfHeaderName = 'X-CSRFToken'
-axios.defaults.withCredentials = true
-
-const API_BASE_URL = 'http://localhost:8000'
+import api from '@/config/axios'
 
 export default {
   name: 'AdminView',
@@ -404,7 +398,6 @@ export default {
       accessList: [],
       accessLogs: [],
       
-      // Статистика
       totalContractors: 0,
       contractorsOnTerritory: 0,
       contractorsOffTerritory: 0,
@@ -432,40 +425,19 @@ export default {
     if (isAuth === 'true' && (userRole === 'guard' || userRole === 'admin')) {
       this.isAuthorized = true
       this.userRole = userRole
-      
       this.loadData()
-      this.getCsrfToken()
     } else {
       this.isAuthorized = false
     }
   },
   methods: {
-    getCsrfToken() {
-      const name = 'csrftoken'
-      let cookieValue = null
-      if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';')
-        for (let i = 0; i < cookies.length; i++) {
-          const cookie = cookies[i].trim()
-          if (cookie.substring(0, name.length + 1) === (name + '=')) {
-            cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
-            break
-          }
-        }
-      }
-      if (cookieValue) {
-        axios.defaults.headers.common['X-CSRFToken'] = cookieValue
-      }
-      return cookieValue
-    },
-    
     getImageUrl(photoPath) {
       if (!photoPath) return ''
       if (photoPath.startsWith('http')) return photoPath
       if (photoPath.startsWith('/media/')) {
-        return `${API_BASE_URL}${photoPath}`
+        return photoPath
       }
-      return `${API_BASE_URL}/media/${photoPath}`
+      return `/media/${photoPath}`
     },
     
     getTerritoryStatus(contractor) {
@@ -521,13 +493,9 @@ export default {
     },
     
     updateStats() {
-      // Общее количество подрядчиков
       this.totalContractors = this.contractors.length
-      
-      // Количество верифицированных
       this.verifiedContractors = this.contractors.filter(c => c.is_verified).length
       
-      // Количество на территории и не на территории
       let onTerritory = 0
       let offTerritory = 0
       
@@ -553,7 +521,7 @@ export default {
     
     async loadContractors() {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/contractors/`)
+        const response = await api.get('/contractors/')
         this.allUsers = response.data.results || response.data || []
         
         this.contractors = this.allUsers.filter(user => {
@@ -566,7 +534,6 @@ export default {
           return true
         })
         
-        // Обновляем статистику
         this.updateStats()
         
         console.log('📊 Все пользователи:', this.allUsers.length)
@@ -580,7 +547,7 @@ export default {
     
     async loadAccessList() {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/access-lists/`, {
+        const response = await api.get('/access-lists/', {
           params: { date: this.selectedDate }
         })
         this.accessList = response.data.results || response.data || []
@@ -591,13 +558,11 @@ export default {
     
     async loadLogs() {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/access-logs/`, {
+        const response = await api.get('/access-logs/', {
           params: { date: this.selectedDate }
         })
         this.accessLogs = response.data.results || response.data || []
         console.log('📊 Загружено логов:', this.accessLogs.length)
-        
-        // Обновляем статистику после загрузки логов
         this.updateStats()
       } catch (error) {
         console.error('Ошибка загрузки логов:', error)
@@ -627,12 +592,9 @@ export default {
           formData.append('photo', this.newContractor.photo)
         }
         
-        const csrfToken = this.getCsrfToken()
-        
-        const response = await axios.post(`${API_BASE_URL}/api/contractors/`, formData, {
+        const response = await api.post('/contractors/', formData, {
           headers: { 
             'Content-Type': 'multipart/form-data',
-            'X-CSRFToken': csrfToken
           }
         })
         
@@ -658,16 +620,9 @@ export default {
     
     async toggleAccess(item) {
       try {
-        const csrfToken = this.getCsrfToken()
-        const response = await axios.post(
-          `${API_BASE_URL}/api/access-lists/${item.id}/toggle_access/`,
-          {
-            ban_reason: item.is_allowed ? 'Доступ запрещен' : ''
-          },
-          {
-            headers: { 'X-CSRFToken': csrfToken }
-          }
-        )
+        const response = await api.post(`/access-lists/${item.id}/toggle_access/`, {
+          ban_reason: item.is_allowed ? 'Доступ запрещен' : ''
+        })
         
         const index = this.accessList.findIndex(a => a.id === item.id)
         if (index !== -1) {
@@ -683,10 +638,7 @@ export default {
       if (!confirm('Удалить подрядчика?')) return
       
       try {
-        const csrfToken = this.getCsrfToken()
-        await axios.delete(`${API_BASE_URL}/api/contractors/${id}/`, {
-          headers: { 'X-CSRFToken': csrfToken }
-        })
+        await api.delete(`/contractors/${id}/`)
         await this.loadContractors()
         alert('✅ Подрядчик удален')
       } catch (error) {
@@ -792,7 +744,6 @@ export default {
   font-size: 16px;
 }
 
-/* Дашборд статистики */
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

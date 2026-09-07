@@ -159,16 +159,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-// Создаем экземпляр axios
-const api = axios.create({
-  baseURL: '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: true,
-})
+import api from '@/config/axios'
 
 export default {
   name: 'WelcomeView',
@@ -183,7 +174,7 @@ export default {
       consentGiven: false,
       showPrivacyPolicy: false,
       showPasswordField: false,
-      userRole: null, // 'contractor', 'guard', 'admin'
+      userRole: null,
     }
   },
   computed: {
@@ -297,13 +288,9 @@ export default {
       
       try {
         // ШАГ 1: Проверяем пользователя
-        console.log('Checking user:', { phone_number: phoneToSend })
-        
         const checkResponse = await api.post('/check-user/', {
           phone_number: phoneToSend
         })
-        
-        console.log('Check response:', checkResponse.data)
         
         if (!checkResponse.data.exists) {
           this.error = 'Пользователь не найден. Обратитесь к администратору.'
@@ -327,15 +314,10 @@ export default {
             return
           }
           
-          // Проверяем пароль
-          console.log('Login with password:', { phone_number: phoneToSend })
-          
           const loginResponse = await api.post('/login/', {
             phone_number: phoneToSend,
             password: this.password
           })
-          
-          console.log('Login response:', loginResponse.data)
           
           if (loginResponse.data.success) {
             this.handleLoginSuccess(loginResponse.data, role)
@@ -347,13 +329,9 @@ export default {
           // ШАГ 3: Подрядчик - вход без пароля
           this.userRole = role
           
-          console.log('Contractor login:', { phone_number: phoneToSend })
-          
           const contractorResponse = await api.post('/contractor-login/', {
             phone_number: phoneToSend
           })
-          
-          console.log('Contractor response:', contractorResponse.data)
           
           if (contractorResponse.data.success) {
             this.handleLoginSuccess(contractorResponse.data, role)
@@ -370,24 +348,16 @@ export default {
         
         if (error.response) {
           const errorData = error.response.data
-          console.error('Error response:', errorData)
           
-          if (error.response.status === 404) {
-            this.error = 'Пользователь не найден'
-          } else if (error.response.status === 403) {
-            this.error = errorData.message || 'Доступ запрещен'
-          } else if (error.response.status === 401) {
-            if (errorData.requires_password) {
-              this.showPasswordField = true
-              this.userRole = 'guard'
-              this.error = errorData.message || 'Введите пароль'
-              this.isLoading = false
-              return
-            }
-            this.error = errorData.message || 'Неверный телефон или пароль'
-          } else {
-            this.error = errorData.message || 'Ошибка сервера'
+          if (error.response.status === 401 && errorData.requires_password) {
+            this.showPasswordField = true
+            this.userRole = 'guard'
+            this.error = errorData.message || 'Введите пароль'
+            this.isLoading = false
+            return
           }
+          
+          this.error = errorData.message || 'Ошибка сервера'
         } else if (error.request) {
           this.error = 'Сервер не отвечает. Проверьте подключение.'
         } else {
@@ -399,13 +369,11 @@ export default {
     },
     
     handleLoginSuccess(data, role) {
-      // Сохраняем JWT токены
       if (data.tokens) {
         localStorage.setItem('access_token', data.tokens.access)
         localStorage.setItem('refresh_token', data.tokens.refresh)
       }
       
-      // Сохраняем данные пользователя
       if (data.user) {
         localStorage.setItem('userData', JSON.stringify(data.user))
         localStorage.setItem('userRole', role || data.user.role || 'contractor')
@@ -413,7 +381,6 @@ export default {
       
       localStorage.setItem('isAuthenticated', 'true')
       
-      // Редирект в зависимости от роли
       if (role === 'guard' || role === 'admin') {
         this.$router.push('/dashboard-admin')
       } else {
@@ -436,14 +403,12 @@ export default {
   watch: {
     phoneRaw() {
       this.validatePhone()
-      // При изменении номера сбрасываем состояние
       if (this.showPasswordField) {
         this.resetForm()
       }
     }
   },
   mounted() {
-    // Проверяем, авторизован ли пользователь
     const isAuth = localStorage.getItem('isAuthenticated')
     const userRole = localStorage.getItem('userRole')
     
@@ -464,6 +429,7 @@ export default {
 </script>
 
 <style scoped>
+/* Стили остаются без изменений */
 * {
   margin: 0;
   padding: 0;

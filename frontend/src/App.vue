@@ -1,7 +1,7 @@
 <!-- frontend/src/App.vue -->
 <template>
   <div id="app">
-    <Header v-if="!isWelcomePage" />
+    <Header />
     <main class="main-content" :class="{ 'no-header': isWelcomePage }">
       <router-view />
     </main>
@@ -22,11 +22,6 @@ export default {
   computed: {
     isWelcomePage() {
       return this.$route.path === '/'
-    }
-  },
-  watch: {
-    '$route.path'() {
-      // При изменении маршрута проверяем, нужно ли показывать Header/Footer
     }
   }
 }
@@ -54,27 +49,25 @@ body {
 
 .main-content {
   flex: 1;
-  padding: 20px;
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
 
 .main-content.no-header {
-  padding: 0;
   max-width: 100%;
+  margin: 0;
 }
 
-/* Адаптивные отступы */
 @media (max-width: 768px) {
   .main-content {
-    padding: 15px;
+    padding: 0 15px;
   }
 }
 
 @media (max-width: 480px) {
   .main-content {
-    padding: 10px;
+    padding: 0 10px;
   }
 }
 </style>

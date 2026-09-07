@@ -8,19 +8,16 @@
       </div>
       
       <nav class="nav-menu" :class="{ 'nav-open': isMenuOpen }">
-        <!-- Показываем только для подрядчиков -->
         <router-link v-if="userRole === 'contractor'" to="/dashboard" class="nav-link" @click="closeMenu">
           <span class="nav-icon">👤</span>
           <span>Мой пропуск</span>
         </router-link>
         
-        <!-- Показываем для охранников и админов -->
         <router-link v-if="userRole === 'guard' || userRole === 'admin'" to="/dashboard-admin" class="nav-link" @click="closeMenu">
           <span class="nav-icon">🛡️</span>
           <span>Панель управления</span>
         </router-link>
         
-        <!-- Показываем для охранников отдельную вкладку -->
         <router-link v-if="userRole === 'guard'" to="/guard" class="nav-link" @click="closeMenu">
           <span class="nav-icon">📷</span>
           <span>Охрана</span>
@@ -33,24 +30,22 @@
       </nav>
       
       <!-- Профиль пользователя -->
-      <div class="user-profile" v-if="userData">
-        <div class="user-info">
-          <span class="user-name">{{ userData.full_name || userData.first_name }}</span>
-          <span class="user-role-badge" :class="userRole">
-            {{ userRole === 'guard' ? '🛡️ Охранник' : userRole === 'admin' ? '⚙️ Админ' : '👤 Подрядчик' }}
-          </span>
-        </div>
-        <div class="user-avatar" @click="openUserModal">
+      <div class="user-profile" v-if="userData" @click="openUserModal">
+        <div class="user-avatar">
           <img 
             v-if="userData.photo" 
             :src="getPhotoUrl(userData.photo)" 
-            :alt="userData.full_name"
+            :alt="userData.full_name || userData.first_name"
             class="avatar-image"
             @error="handleAvatarError"
           />
           <span v-else class="avatar-placeholder">
-            {{ getInitials(userData.full_name || userData.first_name) }}
+            {{ getInitials(userData.full_name || userData.first_name || 'Пользователь') }}
           </span>
+        </div>
+        <div class="user-info">
+          <span class="user-name">{{ userData.full_name || userData.first_name || 'Пользователь' }}</span>
+          <span class="user-phone">{{ userData.phone || userData.phone_number || '' }}</span>
         </div>
       </div>
       
@@ -80,14 +75,24 @@
               @error="handleAvatarError"
             />
             <span v-else class="modal-avatar-placeholder">
-              {{ getInitials(userData?.full_name || userData?.first_name) }}
+              {{ getInitials(userData?.full_name || userData?.first_name || 'Пользователь') }}
             </span>
           </div>
           <div class="user-modal-info">
-            <p><strong>ФИО:</strong> {{ userData?.full_name || 'Не указано' }}</p>
-            <p><strong>Телефон:</strong> {{ userData?.phone_number || 'Не указан' }}</p>
-            <p><strong>Роль:</strong> {{ userRole === 'guard' ? '🛡️ Охранник' : userRole === 'admin' ? '⚙️ Администратор' : '👤 Подрядчик' }}</p>
+            <p><strong>ФИО:</strong> {{ userData?.full_name || userData?.first_name || 'Не указано' }}</p>
+            <p><strong>Телефон:</strong> {{ userData?.phone || userData?.phone_number || 'Не указан' }}</p>
+            <p><strong>Роль:</strong> 
+              <span v-if="userRole === 'guard'">🛡️ Охранник</span>
+              <span v-else-if="userRole === 'admin'">⚙️ Администратор</span>
+              <span v-else>👤 Подрядчик</span>
+            </p>
             <p v-if="userData?.organization"><strong>Организация:</strong> {{ userData.organization }}</p>
+            <p v-if="userData?.is_verified !== undefined">
+              <strong>Статус:</strong> 
+              <span :style="{ color: userData.is_verified ? '#2e7d32' : '#e65100' }">
+                {{ userData.is_verified ? '✅ Верифицирован' : '⏳ Ожидает верификации' }}
+              </span>
+            </p>
           </div>
         </div>
         <div class="user-modal-footer">
@@ -124,6 +129,7 @@ export default {
           this.userRole = role
           this.userData = JSON.parse(userDataStr)
           this.showHeader = true
+          console.log('Header userData:', this.userData)
         } catch (e) {
           console.error('Ошибка парсинга userData:', e)
           this.showHeader = false
@@ -135,11 +141,22 @@ export default {
     
     getPhotoUrl(photoPath) {
       if (!photoPath) return ''
+      
+      // Если уже есть полный URL
       if (photoPath.startsWith('http')) return photoPath
+      
+      // Если путь начинается с /media/ - используем через прокси
       if (photoPath.startsWith('/media/')) {
-        return `http://localhost:8000${photoPath}`
+        return photoPath
       }
-      return `http://localhost:8000/media/${photoPath}`
+      
+      // Если путь начинается с media/ без слеша
+      if (photoPath.startsWith('media/')) {
+        return '/' + photoPath
+      }
+      
+      // В остальных случаях добавляем /media/
+      return `/media/${photoPath}`
     },
     
     getInitials(name) {
@@ -152,6 +169,7 @@ export default {
     },
     
     handleAvatarError(e) {
+      console.log('❌ Ошибка загрузки фото:', e.target.src)
       e.target.style.display = 'none'
       const parent = e.target.parentElement
       const placeholder = parent?.querySelector('.avatar-placeholder')
@@ -295,7 +313,7 @@ export default {
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  padding: 4px 12px 4px 16px;
+  padding: 4px 12px 4px 8px;
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.1);
   transition: background 0.3s;
@@ -304,25 +322,6 @@ export default {
 
 .user-profile:hover {
   background: rgba(255, 255, 255, 0.2);
-}
-
-.user-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.2;
-}
-
-.user-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: white;
-}
-
-.user-role-badge {
-  font-size: 11px;
-  opacity: 0.8;
-  color: rgba(255, 255, 255, 0.9);
 }
 
 .user-avatar {
@@ -354,6 +353,24 @@ export default {
   width: 100%;
   height: 100%;
   background: linear-gradient(135deg, #0d47a1, #1a237e);
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+}
+
+.user-phone {
+  font-size: 11px;
+  opacity: 0.7;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .menu-toggle {

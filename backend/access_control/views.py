@@ -11,6 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from .models import Contractor, AccessList, AccessLog
 from .serializers import ContractorSerializer, AccessListSerializer, AccessLogSerializer
+from .utils import verify_face, process_excel_file, get_today_access, generate_qr_code_image  # Добавляем импорт
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,8 @@ class LoginView(APIView):
 
 
 # ========== ПОЛУЧЕНИЕ QR КОДА ==========
+# backend/access_control/views.py - исправленный GetQRView
+
 @method_decorator(csrf_exempt, name='dispatch')
 class GetQRView(APIView):
     """Получить QR код и код доступа"""
@@ -224,15 +227,43 @@ class GetQRView(APIView):
             user = request.user
             print(f"GetQRView: getting QR for {user.phone_number}")
             
+            if not user.is_verified:
+                return Response({
+                    'success': False,
+                    'message': 'Пользователь не верифицирован'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
             if not user.qr_code:
                 user.generate_qr_code()
+            
+            if not user.access_code:
+                user.generate_access_code()
+            
+            # Генерируем QR код как изображение
+            qr_data = {
+                'id': user.id,
+                'phone': user.phone_number,
+                'name': user.get_full_name(),
+                'code': user.access_code
+            }
+            
+            # Используем функцию из utils
+            qr_image = generate_qr_code_image(qr_data)
+            
+            # Формируем URL фото
+            photo_url = None
+            if user.photo:
+                photo_url = user.photo.url
+                print(f"Photo URL: {photo_url}")
             
             return Response({
                 'success': True,
                 'qr_code': user.qr_code,
+                'qr_image': qr_image,
                 'access_code': user.access_code,
                 'full_name': user.get_full_name(),
                 'phone': user.phone_number,
+                'photo': photo_url,  # Добавляем фото
                 'organization': user.organization,
                 'is_verified': user.is_verified
             })

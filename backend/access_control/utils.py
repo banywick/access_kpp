@@ -15,6 +15,7 @@ from datetime import datetime
 from .models import Contractor, AccessList, AccessLog  # Добавляем импорт
 
 
+
 def verify_face(image_path):
     """
     Проверка наличия лица на фото
@@ -47,17 +48,24 @@ def verify_face(image_path):
         return False
 
 
+# backend/access_control/utils.py
+
 def generate_qr_code_image(data):
     """
-    Генерация QR кода как изображение
+    Генерация QR кода как изображение в base64
     """
+    import qrcode
+    import json
+    import base64
+    from io import BytesIO
+    
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=10,
         border=4,
     )
-    qr.add_data(json.dumps(data))
+    qr.add_data(json.dumps(data, ensure_ascii=False))
     qr.make(fit=True)
     
     img = qr.make_image(fill_color="black", back_color="white")

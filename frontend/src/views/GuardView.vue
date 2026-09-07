@@ -78,7 +78,7 @@
               <div class="contractor-photo">
                 <img 
                   v-if="contractorData?.photo" 
-                  :src="'http://localhost:8000' + contractorData.photo" 
+                  :src="getImageUrl(contractorData.photo)" 
                   :alt="contractorData.full_name"
                   @error="(e) => e.target.style.display = 'none'"
                 />
@@ -175,7 +175,7 @@
       <div class="photo-modal-content" @click.stop>
         <button class="modal-close-btn" @click="closePhotoModal">✕</button>
         <img 
-          :src="'http://localhost:8000' + contractorData?.photo" 
+          :src="getImageUrl(contractorData?.photo)" 
           :alt="contractorData?.full_name"
           class="modal-photo"
           @error="(e) => e.target.style.display = 'none'"
@@ -192,11 +192,7 @@
 
 <script>
 import jsQR from 'jsqr'
-import axios from 'axios'
-
-axios.defaults.xsrfCookieName = 'csrftoken'
-axios.defaults.xsrfHeaderName = 'X-CSRFToken'
-axios.defaults.withCredentials = true
+import api from '@/config/axios'
 
 export default {
   name: 'GuardView',
@@ -216,7 +212,7 @@ export default {
       stream: null,
       scanInterval: null,
       showPhotoModal: false,
-      currentUser: null // Данные текущего пользователя (охранника)
+      currentUser: null
     }
   },
   computed: {
@@ -225,7 +221,6 @@ export default {
     }
   },
   mounted() {
-    // Загружаем данные текущего пользователя из localStorage
     const userDataStr = localStorage.getItem('userData')
     if (userDataStr) {
       try {
@@ -237,20 +232,13 @@ export default {
     }
   },
   methods: {
-    getCsrfToken() {
-      const name = 'csrftoken'
-      let cookieValue = null
-      if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';')
-        for (let i = 0; i < cookies.length; i++) {
-          const cookie = cookies[i].trim()
-          if (cookie.substring(0, name.length + 1) === (name + '=')) {
-            cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
-            break
-          }
-        }
+    getImageUrl(photoPath) {
+      if (!photoPath) return ''
+      if (photoPath.startsWith('http')) return photoPath
+      if (photoPath.startsWith('/media/')) {
+        return photoPath
       }
-      return cookieValue
+      return `/media/${photoPath}`
     },
     
     getDaysClass(days) {
@@ -287,11 +275,8 @@ export default {
       this.resetState()
       
       try {
-        const csrfToken = this.getCsrfToken()
-        const response = await axios.post('/api/get-contractor-info/', {
+        const response = await api.post('/get-contractor-info/', {
           access_code: this.manualCode
-        }, {
-          headers: { 'X-CSRFToken': csrfToken }
         })
         
         console.log('Find contractor response:', response.data)
@@ -368,11 +353,8 @@ export default {
         this.isLoading = true
         this.resetState()
         
-        const csrfToken = this.getCsrfToken()
-        const response = await axios.post('/api/get-contractor-info/', {
+        const response = await api.post('/get-contractor-info/', {
           qr_code: qrData
-        }, {
-          headers: { 'X-CSRFToken': csrfToken }
         })
         
         console.log('QR Find response:', response.data)
@@ -401,53 +383,48 @@ export default {
     },
     
     async processAccess(type) {
-    this.isProcessing = true
-    this.actionResult = null
-    
-    try {
-        const csrfToken = this.getCsrfToken()
-        
-        // Собираем данные для отправки
+      this.isProcessing = true
+      this.actionResult = null
+      
+      try {
         const requestData = {
-            access_code: this.contractorData?.access_code,
-            access_type: type,
-            guard_id: this.currentUser?.id,  // Используем ID вместо телефона
-            guard_phone: this.currentUser?.phone_number,
-            guard_name: this.currentUser?.full_name
+          access_code: this.contractorData?.access_code,
+          access_type: type,
+          guard_id: this.currentUser?.id,
+          guard_phone: this.currentUser?.phone_number,
+          guard_name: this.currentUser?.full_name
         }
         
         console.log('Process access request:', requestData)
         
-        const response = await axios.post('/api/scan-qr/', requestData, {
-            headers: { 'X-CSRFToken': csrfToken }
-        })
+        const response = await api.post('/scan-qr/', requestData)
         
         console.log('Process access response:', response.data)
         
         if (response.data.success) {
-            this.isOnTerritory = response.data.is_on_territory || false
-            if (response.data.contractor) {
-                this.contractorData = response.data.contractor
-            }
-            if (response.data.valid_until) {
-                this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
-            }
-            this.actionResult = {
-                success: true,
-                message: response.data.message || 'Операция выполнена успешно'
-            }
+          this.isOnTerritory = response.data.is_on_territory || false
+          if (response.data.contractor) {
+            this.contractorData = response.data.contractor
+          }
+          if (response.data.valid_until) {
+            this.daysRemaining = this.calculateDaysRemaining(response.data.valid_until)
+          }
+          this.actionResult = {
+            success: true,
+            message: response.data.message || 'Операция выполнена успешно'
+          }
         }
-    } catch (error) {
+      } catch (error) {
         console.error('Process access error:', error.response?.data)
         const errorData = error.response?.data || {}
         this.actionResult = {
-            success: false,
-            message: errorData.message || errorData.reason || 'Ошибка операции'
+          success: false,
+          message: errorData.message || errorData.reason || 'Ошибка операции'
         }
-    } finally {
+      } finally {
         this.isProcessing = false
-    }
-},
+      }
+    },
     
     showError(message) {
       this.scanError = true
@@ -507,7 +484,6 @@ export default {
 </script>
 
 <style scoped>
-/* Все стили остаются без изменений */
 .guard-view {
   min-height: 80vh;
   padding: 20px;

@@ -1,21 +1,6 @@
 <!-- frontend/src/views/ContractorView.vue -->
 <template>
   <div class="contractor-view">
-    <!-- Шапка -->
-    <header class="header">
-      <div class="header-content">
-        <div class="logo-section">
-          <span class="logo-icon">🏢</span>
-          <h1 class="logo-text">Электронный пропуск</h1>
-        </div>
-        <div class="user-section">
-          <span class="user-name">{{ user.full_name || user.phone }}</span>
-          <button @click="logout" class="logout-btn">Выйти</button>
-        </div>
-      </div>
-    </header>
-
-    <!-- Основной контент -->
     <main class="main-content">
       <div class="container">
         <!-- Статус верификации -->
@@ -89,18 +74,17 @@
                 <p>{{ qrError }}</p>
                 <button @click="loadQRCode" class="retry-btn">Повторить</button>
               </div>
-              <div v-else-if="qrCode" class="qr-display">
+              <div v-else-if="qrImage" class="qr-display">
                 <div class="qr-image-wrapper">
                   <img 
-                    :src="qrCodeImageUrl" 
+                    :src="qrImage" 
                     alt="QR Code"
                     class="qr-image"
-                    @error="handleQRError"
                   />
                 </div>
                 <div class="access-code">
                   <span class="code-label">Код доступа:</span>
-                  <span class="code-value">{{ accessCode }}</span>
+                  <span class="code-value">{{ accessCode || '----' }}</span>
                   <button @click="copyAccessCode" class="copy-btn">
                     {{ copied ? '✅' : '📋' }}
                   </button>
@@ -126,7 +110,11 @@
               </div>
               <div class="info-item">
                 <span class="info-label">Телефон</span>
-                <span class="info-value">{{ user.phone }}</span>
+                <span class="info-value">{{ user.phone || user.phone_number || 'Не указан' }}</span>
+              </div>
+              <div class="info-item" v-if="user.full_name">
+                <span class="info-label">ФИО</span>
+                <span class="info-value">{{ user.full_name }}</span>
               </div>
             </div>
           </div>
@@ -137,46 +125,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-// Создаем экземпляр axios
-const api = axios.create({
-  baseURL: '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: true,
-})
-
-// Интерцептор для добавления токена
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
-// Интерцептор для обработки 401
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('userData')
-      localStorage.removeItem('userRole')
-      localStorage.removeItem('isAuthenticated')
-      window.location.href = '/'
-    }
-    return Promise.reject(error)
-  }
-)
+import api from '../config/axios'
 
 export default {
   name: 'ContractorView',
@@ -184,42 +133,53 @@ export default {
     return {
       user: {
         full_name: '',
+        first_name: '',
+        last_name: '',
         phone: '',
+        phone_number: '',
         is_verified: false,
         organization: '',
-        role: 'contractor'
+        role: 'contractor',
+        photo: null
       },
       previewImage: null,
       selectedFile: null,
       uploading: false,
       uploadError: null,
       qrCode: null,
+      qrImage: null,
       accessCode: null,
       qrLoading: false,
       qrError: null,
       copied: false
     }
   },
-  computed: {
-    qrCodeImageUrl() {
-      if (!this.qrCode) return ''
-      // Используем наш бэкенд для генерации QR кода
-      return `http://localhost:8000/api/get-qr/?code=${this.qrCode}`
-    }
-  },
   mounted() {
-    // Загружаем данные пользователя из localStorage
-    const userData = localStorage.getItem('userData')
-    if (userData) {
-      this.user = JSON.parse(userData)
-    }
-    
-    // Загружаем QR код
-    if (this.user.is_verified) {
-      this.loadQRCode()
-    }
+    this.loadUserData()
   },
   methods: {
+    loadUserData() {
+      const userData = localStorage.getItem('userData')
+      if (userData) {
+        try {
+          const parsed = JSON.parse(userData)
+          this.user = {
+            ...this.user,
+            ...parsed,
+            phone: parsed.phone || parsed.phone_number || '',
+            phone_number: parsed.phone || parsed.phone_number || ''
+          }
+          console.log('User data loaded:', this.user)
+        } catch (e) {
+          console.error('Error parsing user data:', e)
+        }
+      }
+      
+      if (this.user.is_verified) {
+        this.loadQRCode()
+      }
+    },
+    
     async loadQRCode() {
       this.qrLoading = true
       this.qrError = null
@@ -230,15 +190,20 @@ export default {
         
         if (response.data.success) {
           this.qrCode = response.data.qr_code
+          this.qrImage = response.data.qr_image
           this.accessCode = response.data.access_code
           
-          // Обновляем данные пользователя
+          // Обновляем данные пользователя из ответа
           this.user = {
             ...this.user,
-            ...response.data
+            full_name: response.data.full_name || this.user.full_name,
+            phone: response.data.phone || this.user.phone,
+            phone_number: response.data.phone || this.user.phone_number,
+            organization: response.data.organization || this.user.organization,
+            photo: response.data.photo || this.user.photo,  // Сохраняем фото
+            is_verified: response.data.is_verified !== undefined ? response.data.is_verified : this.user.is_verified
           }
           
-          // Сохраняем обновленные данные
           localStorage.setItem('userData', JSON.stringify(this.user))
         } else {
           this.qrError = response.data.message || 'Ошибка загрузки QR кода'
@@ -316,21 +281,17 @@ export default {
         console.log('Upload response:', response.data)
         
         if (response.data.success) {
-          // Обновляем статус пользователя
           this.user.is_verified = true
           this.user.photo = response.data.photo_url
           
-          // Сохраняем в localStorage
           localStorage.setItem('userData', JSON.stringify(this.user))
           
-          // Загружаем QR код
           await this.loadQRCode()
           
           this.uploadError = null
           this.previewImage = null
           this.selectedFile = null
           
-          // Показываем уведомление об успехе
           alert('✅ Фото успешно загружено! QR код теперь доступен.')
         } else {
           this.uploadError = response.data.message || 'Ошибка загрузки фото'
@@ -343,15 +304,6 @@ export default {
       }
     },
     
-    handleQRError(event) {
-      console.error('QR image error:', event)
-      // Если не загрузился через внешний API, пробуем через наш бэкенд
-      if (this.qrCode) {
-        // Просто показываем код доступа
-        this.qrError = 'Не удалось загрузить QR код, но код доступа доступен ниже'
-      }
-    },
-    
     copyAccessCode() {
       if (!this.accessCode) return
       
@@ -361,7 +313,6 @@ export default {
           this.copied = false
         }, 2000)
       }).catch(() => {
-        // Fallback
         const input = document.createElement('input')
         input.value = this.accessCode
         document.body.appendChild(input)
@@ -388,73 +339,339 @@ export default {
 </script>
 
 <style scoped>
+/* Стили остаются без изменений */
 .contractor-view {
-  min-height: 80vh;
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.main-content {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 30px 20px;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #ffc107;
+}
+
+.status-card.verified {
+  border-left-color: #4caf50;
+}
+
+.status-icon {
+  font-size: 32px;
+}
+
+.status-text h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  color: #1a237e;
+}
+
+.status-text p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.photo-upload-card {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.photo-upload-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  color: #1a237e;
+}
+
+.upload-hint {
+  margin: 0 0 16px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.upload-area {
+  border: 2px dashed #e0e0e0;
+  border-radius: 12px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.3s, background 0.3s;
+  margin-bottom: 16px;
+}
+
+.upload-area:hover {
+  border-color: #1a237e;
+  background: #f8f9ff;
+}
+
+.upload-placeholder .upload-icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.upload-placeholder p {
+  margin: 0 0 4px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.upload-placeholder small {
+  color: #999;
+  font-size: 13px;
+}
+
+.upload-preview {
+  position: relative;
+  display: inline-block;
+}
+
+.upload-preview img {
+  max-height: 200px;
+  border-radius: 8px;
+}
+
+.preview-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  color: white;
+  font-weight: 500;
 }
 
-.contractor-container {
+.upload-preview:hover .preview-overlay {
+  opacity: 1;
+}
+
+.upload-btn {
   width: 100%;
-  max-width: 600px;
+  padding: 14px;
+  background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+.upload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-message {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fde8e8;
+  color: #c62828;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.qr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.qr-card {
   background: white;
-  border-radius: 16px;
-  padding: 30px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-}
-
-.loading-container {
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   text-align: center;
-  padding: 40px;
 }
 
-.spinner {
+.qr-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  color: #1a237e;
+}
+
+.qr-hint {
+  margin: 0 0 20px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.qr-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.qr-loading .spinner {
   width: 40px;
   height: 40px;
-  margin: 0 auto 20px;
   border: 4px solid #e0e0e0;
   border-top-color: #1a237e;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+  margin: 0 auto 12px;
 }
 
-.redirect-message {
-  text-align: center;
-  padding: 40px 20px;
-}
-
-.redirect-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
-}
-
-.redirect-message h2 {
-  color: #1a237e;
-  margin-bottom: 10px;
-}
-
-.redirect-message p {
+.qr-loading p {
   color: #666;
-  margin-bottom: 20px;
+  margin: 0;
 }
 
-.go-home-btn {
-  padding: 12px 30px;
-  background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
+.qr-error {
+  text-align: center;
+}
+
+.qr-error .error-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.qr-error p {
+  color: #666;
+  margin: 0 0 12px 0;
+}
+
+.retry-btn {
+  padding: 8px 24px;
+  background: #1a237e;
   color: white;
   border: none;
-  border-radius: 10px;
-  font-size: 16px;
-  font-weight: 600;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.3s;
+  font-size: 14px;
 }
 
-.go-home-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3);
+.qr-image-wrapper {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  display: inline-block;
+}
+
+.qr-image {
+  max-width: 250px;
+  max-height: 250px;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.access-code {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  background: #f8f9ff;
+  padding: 12px 20px;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.code-label {
+  color: #666;
+  font-size: 14px;
+}
+
+.code-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a237e;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 4px;
+}
+
+.copy-btn {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 0.3s;
+}
+
+.copy-btn:hover {
+  background: #f0f0f0;
+}
+
+.code-hint {
+  margin: 0;
+  color: #999;
+  font-size: 13px;
+}
+
+.access-info-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.access-info-card h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #1a237e;
+}
+
+.info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.info-item:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.info-value {
+  color: #1a237e;
+  font-weight: 600;
+}
+
+.status-active {
+  color: #2e7d32;
 }
 
 @keyframes spin {
@@ -462,9 +679,26 @@ export default {
 }
 
 @media (max-width: 480px) {
-  .contractor-container {
-    padding: 20px;
-    border-radius: 12px;
+  .main-content {
+    padding: 15px 10px;
+  }
+  
+  .qr-image {
+    max-width: 180px;
+  }
+  
+  .access-code {
+    flex-wrap: wrap;
+  }
+  
+  .code-value {
+    font-size: 20px;
+  }
+  
+  .info-item {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
   }
 }
 </style>

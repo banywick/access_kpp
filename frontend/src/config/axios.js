@@ -1,10 +1,9 @@
 // frontend/src/config/axios.js
-
 import axios from 'axios'
 
-// Создаем экземпляр axios с базовым URL
+// Создаем экземпляр axios с базовым URL через прокси
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api',  // Полный URL
+  baseURL: '/api',  // Используем относительный путь через прокси Vite
   headers: {
     'Content-Type': 'application/json',
   },
@@ -18,6 +17,11 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // Добавляем CSRF токен
+    const csrfToken = getCsrfToken()
+    if (csrfToken) {
+      config.headers['X-CSRFToken'] = csrfToken
+    }
     return config
   },
   (error) => {
@@ -25,7 +29,7 @@ api.interceptors.request.use(
   }
 )
 
-// Интерцептор для обработки ошибок (обновление токена)
+// Интерцептор для обработки ошибок
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -41,7 +45,6 @@ api.interceptors.response.use(
           throw new Error('Нет refresh токена')
         }
         
-        // Обновляем токен
         const response = await axios.post('/api/token/refresh/', {
           refresh: refreshToken
         })
@@ -49,14 +52,15 @@ api.interceptors.response.use(
         const { access } = response.data
         localStorage.setItem('access_token', access)
         
-        // Повторяем запрос с новым токеном
         originalRequest.headers.Authorization = `Bearer ${access}`
         return api(originalRequest)
       } catch (refreshError) {
-        // Не удалось обновить токен - выходим
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        localStorage.removeItem('userData')
+        localStorage.removeItem('userRole')
+        localStorage.removeItem('isAuthenticated')
+        window.location.href = '/'
         return Promise.reject(refreshError)
       }
     }
@@ -64,5 +68,22 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// Функция для получения CSRF токена из cookies
+function getCsrfToken() {
+  const name = 'csrftoken'
+  let cookieValue = null
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';')
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim()
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1))
+        break
+      }
+    }
+  }
+  return cookieValue
+}
 
 export default api
