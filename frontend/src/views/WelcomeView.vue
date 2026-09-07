@@ -159,7 +159,7 @@
 </template>
 
 <script>
-import api from '@/config/axios'
+import api from '../config/axios'
 
 export default {
   name: 'WelcomeView',
@@ -288,9 +288,13 @@ export default {
       
       try {
         // ШАГ 1: Проверяем пользователя
+        console.log('Checking user:', { phone_number: phoneToSend })
+        
         const checkResponse = await api.post('/check-user/', {
           phone_number: phoneToSend
         })
+        
+        console.log('Check response:', checkResponse.data)
         
         if (!checkResponse.data.exists) {
           this.error = 'Пользователь не найден. Обратитесь к администратору.'
@@ -375,7 +379,12 @@ export default {
       }
       
       if (data.user) {
-        localStorage.setItem('userData', JSON.stringify(data.user))
+        const userData = {
+          ...data.user,
+          phone: data.user.phone || data.user.phone_number || '',
+          phone_number: data.user.phone || data.user.phone_number || ''
+        }
+        localStorage.setItem('userData', JSON.stringify(userData))
         localStorage.setItem('userRole', role || data.user.role || 'contractor')
       }
       
@@ -429,7 +438,6 @@ export default {
 </script>
 
 <style scoped>
-/* Стили остаются без изменений */
 * {
   margin: 0;
   padding: 0;

@@ -200,11 +200,12 @@ export default {
             phone: response.data.phone || this.user.phone,
             phone_number: response.data.phone || this.user.phone_number,
             organization: response.data.organization || this.user.organization,
-            photo: response.data.photo || this.user.photo,  // Сохраняем фото
-            is_verified: response.data.is_verified !== undefined ? response.data.is_verified : this.user.is_verified
+            photo: response.data.photo || this.user.photo,
+            is_verified: true
           }
           
           localStorage.setItem('userData', JSON.stringify(this.user))
+          this.$emit('verified')
         } else {
           this.qrError = response.data.message || 'Ошибка загрузки QR кода'
         }
@@ -216,11 +217,34 @@ export default {
           setTimeout(() => {
             this.$router.push('/')
           }, 3000)
+        } else if (error.response?.status === 403) {
+          this.qrError = 'Пользователь еще не верифицирован. Пожалуйста, подождите.'
+          // Пробуем обновить статус
+          await this.refreshUserStatus()
         } else {
           this.qrError = error.response?.data?.message || 'Ошибка загрузки QR кода'
         }
       } finally {
         this.qrLoading = false
+      }
+    },
+    
+    async refreshUserStatus() {
+      try {
+        // Получаем актуальные данные пользователя
+        const userData = localStorage.getItem('userData')
+        if (userData) {
+          const parsed = JSON.parse(userData)
+          // Проверяем статус через API
+          const response = await api.get(`/contractors/${parsed.id}/`)
+          if (response.data && response.data.is_verified) {
+            this.user.is_verified = true
+            localStorage.setItem('userData', JSON.stringify({...parsed, is_verified: true}))
+            await this.loadQRCode()
+          }
+        }
+      } catch (error) {
+        console.error('Error refreshing user status:', error)
       }
     },
     
@@ -281,24 +305,51 @@ export default {
         console.log('Upload response:', response.data)
         
         if (response.data.success) {
+          // Обновляем статус пользователя
           this.user.is_verified = true
-          this.user.photo = response.data.photo_url
+          if (response.data.photo_url) {
+            this.user.photo = response.data.photo_url
+          }
           
-          localStorage.setItem('userData', JSON.stringify(this.user))
-          
-          await this.loadQRCode()
+          // Сохраняем обновленные данные
+          const currentData = JSON.parse(localStorage.getItem('userData') || '{}')
+          const updatedData = {
+            ...currentData,
+            ...this.user,
+            is_verified: true,
+            photo: response.data.photo_url || currentData.photo
+          }
+          localStorage.setItem('userData', JSON.stringify(updatedData))
           
           this.uploadError = null
           this.previewImage = null
           this.selectedFile = null
           
-          alert('✅ Фото успешно загружено! QR код теперь доступен.')
+          // Показываем сообщение об успехе
+          alert('✅ Фото успешно загружено! QR код будет сгенерирован.')
+          
+          // Загружаем QR код
+          await this.loadQRCode()
+          
+          // Если QR не загрузился, обновляем страницу
+          if (!this.qrImage && !this.qrError) {
+            setTimeout(() => {
+              this.loadQRCode()
+            }, 2000)
+          }
         } else {
           this.uploadError = response.data.message || 'Ошибка загрузки фото'
         }
       } catch (error) {
         console.error('Upload error:', error)
-        this.uploadError = error.response?.data?.message || 'Ошибка загрузки фото'
+        if (error.response?.status === 403) {
+          this.uploadError = 'Недостаточно прав. Пожалуйста, войдите заново.'
+          setTimeout(() => {
+            this.$router.push('/')
+          }, 3000)
+        } else {
+          this.uploadError = error.response?.data?.message || 'Ошибка загрузки фото'
+        }
       } finally {
         this.uploading = false
       }

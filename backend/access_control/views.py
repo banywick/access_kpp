@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 # ========== ПРОВЕРКА ПОЛЬЗОВАТЕЛЯ ==========
 @method_decorator(csrf_exempt, name='dispatch')
 class CheckUserView(APIView):
-    permission_classes = []
+    # Явно указываем, что аутентификация не требуется
+    authentication_classes = []  # Отключаем аутентификацию
+    permission_classes = [permissions.AllowAny]  # Разрешаем всем
     
     def post(self, request):
         try:
@@ -76,6 +78,7 @@ class CheckUserView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class ContractorLoginView(APIView):
     """Вход для подрядчиков - без пароля"""
+    authentication_classes = []  # Отключаем аутентификацию
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):

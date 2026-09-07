@@ -3,7 +3,7 @@ import axios from 'axios'
 
 // Создаем экземпляр axios с базовым URL через прокси
 const api = axios.create({
-  baseURL: '/api',  // Используем относительный путь через прокси Vite
+  baseURL: '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -34,6 +34,11 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
+    
+    // Если это запрос к check-user и ошибка 401, не пытаемся обновлять токен
+    if (originalRequest.url === '/check-user/' && error.response?.status === 401) {
+      return Promise.reject(error)
+    }
     
     // Если токен истек и это не повторный запрос
     if (error.response?.status === 401 && !originalRequest._retry) {
