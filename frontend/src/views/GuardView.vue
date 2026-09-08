@@ -54,6 +54,7 @@
             class="camera-video" 
             autoplay 
             playsinline
+            muted
           ></video>
           <div class="camera-overlay">
             <div class="scan-frame"></div>
@@ -77,12 +78,12 @@
             <div class="contractor-photo-wrapper" @click="openPhotoModal">
               <div class="contractor-photo">
                 <img 
-                  v-if="contractorData?.photo" 
-                  :src="getImageUrl(contractorData.photo)" 
+                  v-if="contractorData?.photo_url || contractorData?.photo" 
+                  :src="getImageUrl(contractorData?.photo_url || contractorData?.photo)" 
                   :alt="contractorData.full_name"
                   @error="(e) => e.target.style.display = 'none'"
                 />
-                <div v-if="!contractorData?.photo" class="no-photo">👤</div>
+                <div v-if="!contractorData?.photo_url && !contractorData?.photo" class="no-photo">👤</div>
               </div>
               <div class="photo-expand-hint">
                 <span>🔍</span>
@@ -126,14 +127,14 @@
           <div class="action-buttons">
             <button 
               class="action-btn entry-btn" 
-              @click="processAccess('entry')"
+              @click="handleEntry"
               :disabled="isProcessing || isOnTerritory"
             >
               🚗 Заехал
             </button>
             <button 
               class="action-btn exit-btn" 
-              @click="processAccess('exit')"
+              @click="handleExit"
               :disabled="isProcessing || !isOnTerritory"
             >
               🚗 Выехал
@@ -175,7 +176,7 @@
       <div class="photo-modal-content" @click.stop>
         <button class="modal-close-btn" @click="closePhotoModal">✕</button>
         <img 
-          :src="getImageUrl(contractorData?.photo)" 
+          :src="getImageUrl(contractorData?.photo_url || contractorData?.photo)" 
           :alt="contractorData?.full_name"
           class="modal-photo"
           @error="(e) => e.target.style.display = 'none'"
@@ -192,7 +193,7 @@
 
 <script>
 import jsQR from 'jsqr'
-import api from '@/config/axios'
+import api from '../config/axios'
 
 export default {
   name: 'GuardView',
@@ -234,7 +235,13 @@ export default {
   methods: {
     getImageUrl(photoPath) {
       if (!photoPath) return ''
-      if (photoPath.startsWith('http')) return photoPath
+      if (photoPath.startsWith('http')) {
+        const pathMatch = photoPath.match(/\/media\/.*/)
+        if (pathMatch) {
+          return pathMatch[0]
+        }
+        return photoPath
+      }
       if (photoPath.startsWith('/media/')) {
         return photoPath
       }
@@ -308,42 +315,170 @@ export default {
       try {
         this.resetState()
         
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('📷 Камера не поддерживается на этом устройстве.\nИспользуйте ручной ввод кода.')
+          return
+        }
+        
+        this.isCameraActive = true
+        await this.$nextTick()
+        
+        let videoElement = this.$refs.video
+        
+        if (!videoElement) {
+          videoElement = document.getElementById('scanner-video')
+        }
+        
+        if (!videoElement) {
+          const container = document.querySelector('.camera-container')
+          if (container) {
+            videoElement = container.querySelector('video')
+          }
+        }
+        
+        if (!videoElement) {
+          videoElement = document.createElement('video')
+          videoElement.id = 'scanner-video'
+          videoElement.className = 'camera-video'
+          videoElement.setAttribute('autoplay', 'true')
+          videoElement.setAttribute('playsinline', 'true')
+          videoElement.setAttribute('muted', 'true')
+          videoElement.style.width = '100%'
+          videoElement.style.height = '100%'
+          videoElement.style.objectFit = 'cover'
+          
+          const container = document.querySelector('.camera-container')
+          if (container) {
+            container.insertBefore(videoElement, container.firstChild)
+          } else {
+            const scannerSection = document.querySelector('.scanner-section')
+            if (scannerSection) {
+              const newContainer = document.createElement('div')
+              newContainer.className = 'camera-container'
+              newContainer.style.display = 'block'
+              newContainer.appendChild(videoElement)
+              scannerSection.appendChild(newContainer)
+            }
+          }
+          
+          this.$refs.video = videoElement
+        }
+        
+        console.log('Video element found:', videoElement)
+        
+        const constraints = {
+          video: {
             facingMode: 'environment',
             width: { ideal: 640 },
             height: { ideal: 480 }
+          },
+          audio: false
+        }
+        
+        console.log('Requesting camera...')
+        
+        this.stream = await navigator.mediaDevices.getUserMedia(constraints)
+        
+        if (!this.stream) {
+          throw new Error('Не удалось получить поток с камеры')
+        }
+        
+        console.log('Camera stream obtained')
+        
+        videoElement.srcObject = this.stream
+        videoElement.setAttribute('playsinline', 'true')
+        videoElement.setAttribute('autoplay', 'true')
+        videoElement.muted = true
+        
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Таймаут загрузки видео'))
+          }, 10000)
+          
+          videoElement.onloadedmetadata = () => {
+            clearTimeout(timeout)
+            resolve()
+          }
+          
+          videoElement.onerror = (e) => {
+            clearTimeout(timeout)
+            reject(new Error('Ошибка загрузки видео: ' + (e.message || 'неизвестная')))
           }
         })
         
-        this.$refs.video.srcObject = this.stream
-        await this.$refs.video.play()
-        this.isCameraActive = true
+        try {
+          await videoElement.play()
+          console.log('Video playing')
+        } catch (playError) {
+          console.error('Play error:', playError)
+          videoElement.play().catch(e => console.warn('Play fallback:', e))
+        }
         
-        this.scanInterval = setInterval(this.scanFrame, 500)
+        console.log('Camera started successfully')
+        
+        if (this.scanInterval) {
+          clearInterval(this.scanInterval)
+        }
+        this.scanInterval = setInterval(this.scanFrame, 300)
+        
       } catch (error) {
         console.error('Ошибка доступа к камере:', error)
-        alert('Не удалось открыть камеру. Используйте ручной ввод кода.')
+        
+        let errorMessage = 'Не удалось открыть камеру.\n'
+        
+        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          errorMessage += '⚠️ Разрешите доступ к камере в настройках браузера.'
+        } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+          errorMessage += '📷 Камера не найдена на этом устройстве.'
+        } else if (error.name === 'NotSupportedError') {
+          errorMessage += '📷 Камера не поддерживается.'
+        } else if (error.name === 'OverconstrainedError') {
+          errorMessage += '📷 Камера не поддерживает требуемые настройки.'
+        } else {
+          errorMessage += `❌ ${error.message || 'Неизвестная ошибка'}`
+        }
+        
+        errorMessage += '\n\n💡 Используйте ручной ввод кода доступа.'
+        
+        alert(errorMessage)
+        this.isCameraActive = false
       }
     },
     
     scanFrame() {
-      if (!this.$refs.video) return
-      
-      const canvas = document.createElement('canvas')
       const video = this.$refs.video
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')
-      ctx.drawImage(video, 0, 0)
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      if (!video) return
       
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "dontInvert",
-      })
+      if (video.readyState < 2) {
+        return
+      }
       
-      if (code && code.data) {
-        this.processQRCode(code.data)
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        return
+      }
+      
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.min(video.videoWidth, 640)
+        canvas.height = Math.min(video.videoHeight, 480)
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        })
+        
+        if (code && code.data) {
+          console.log('QR Code detected:', code.data)
+          if (this.scanInterval) {
+            clearInterval(this.scanInterval)
+            this.scanInterval = null
+          }
+          this.processQRCode(code.data)
+        }
+      } catch (error) {
+        console.error('Scan frame error:', error)
       }
     },
     
@@ -352,6 +487,8 @@ export default {
         this.stopCamera()
         this.isLoading = true
         this.resetState()
+        
+        console.log('Sending QR code to server:', qrData)
         
         const response = await api.post('/get-contractor-info/', {
           qr_code: qrData
@@ -382,7 +519,28 @@ export default {
       }
     },
     
+    // Метод для обработки въезда
+    async handleEntry() {
+      await this.processAccess('entry')
+    },
+    
+    // Метод для обработки выезда
+    async handleExit() {
+      await this.processAccess('exit')
+    },
+    
     async processAccess(type) {
+      console.log('processAccess called with type:', type)
+      
+      if (!this.contractorData) {
+        console.error('No contractor data')
+        this.actionResult = {
+          success: false,
+          message: 'Нет данных о подрядчике'
+        }
+        return
+      }
+      
       this.isProcessing = true
       this.actionResult = null
       
@@ -412,6 +570,11 @@ export default {
           this.actionResult = {
             success: true,
             message: response.data.message || 'Операция выполнена успешно'
+          }
+        } else {
+          this.actionResult = {
+            success: false,
+            message: response.data.message || 'Ошибка операции'
           }
         }
       } catch (error) {
@@ -443,15 +606,36 @@ export default {
     },
     
     stopCamera() {
+      console.log('Stopping camera...')
+      
       if (this.stream) {
-        this.stream.getTracks().forEach(track => track.stop())
+        try {
+          this.stream.getTracks().forEach(track => {
+            track.stop()
+            console.log('Track stopped:', track.kind)
+          })
+        } catch (e) {
+          console.warn('Error stopping tracks:', e)
+        }
         this.stream = null
       }
+      
       if (this.scanInterval) {
         clearInterval(this.scanInterval)
         this.scanInterval = null
       }
+      
+      if (this.$refs.video) {
+        try {
+          this.$refs.video.srcObject = null
+          this.$refs.video.pause()
+        } catch (e) {
+          console.warn('Error clearing video:', e)
+        }
+      }
+      
       this.isCameraActive = false
+      console.log('Camera stopped')
     },
     
     resetScanner() {
@@ -465,7 +649,7 @@ export default {
     },
     
     openPhotoModal() {
-      if (this.contractorData?.photo) {
+      if (this.contractorData?.photo_url || this.contractorData?.photo) {
         this.showPhotoModal = true
         document.body.style.overflow = 'hidden'
       }
@@ -484,6 +668,7 @@ export default {
 </script>
 
 <style scoped>
+/* Все стили остаются без изменений */
 .guard-view {
   min-height: 80vh;
   padding: 20px;
@@ -658,12 +843,18 @@ export default {
   background: #000;
   border-radius: 16px;
   overflow: hidden;
+  display: none;
+}
+
+.camera-container[style*="display: block"] {
+  display: block !important;
 }
 
 .camera-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  background: #000;
 }
 
 .camera-overlay {

@@ -215,18 +215,20 @@ class Contractor(AbstractUser):
         return f"{self.first_name} {self.last_name}".strip()
     
     def generate_qr_code(self):
-        """Генерация QR кода (только для верифицированных)"""
+        """Генерация QR кода - сохраняем JSON в qr_code поле"""
         if not self.is_verified:
             return None
+        
+        # Сохраняем JSON данные в поле qr_code
         data = {
             'id': self.id,
             'phone': self.phone_number,
             'name': self.get_full_name(),
             'code': self.access_code
         }
-        self.qr_code = hashlib.sha256(
-            json.dumps(data, sort_keys=True).encode()
-        ).hexdigest()[:32]
+        
+        # Сохраняем JSON строку в qr_code
+        self.qr_code = json.dumps(data, ensure_ascii=False)
         self.save(update_fields=['qr_code'])
         return self.qr_code
     

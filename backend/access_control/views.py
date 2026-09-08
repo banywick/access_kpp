@@ -418,6 +418,8 @@ class AccessLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 # ========== QR СКАНИРОВАНИЕ ==========
+# backend/access_control/views.py
+
 @method_decorator(csrf_exempt, name='dispatch')
 class QRScanView(APIView):
     """Сканирование QR кода и обработка доступа"""
@@ -426,17 +428,54 @@ class QRScanView(APIView):
     def post(self, request):
         try:
             access_code = request.data.get('access_code')
-            qr_code = request.data.get('qr_code')
+            qr_code_raw = request.data.get('qr_code')
             access_type = request.data.get('access_type', 'entry')
             guard_id = request.data.get('guard_id')
             guard_phone = request.data.get('guard_phone')
+            guard_name = request.data.get('guard_name')
             
-            # Ищем подрядчика по коду доступа или QR коду
+            print(f"QRScanView: access_code={access_code}, qr_code_raw={qr_code_raw}, type={access_type}")
+            
             contractor = None
-            if access_code:
+            
+            # Пытаемся декодировать QR код
+            if qr_code_raw:
+                try:
+                    import json
+                    qr_data = json.loads(qr_code_raw)
+                    print(f"Decoded QR data: {qr_data}")
+                    
+                    # Ищем по ID из QR
+                    contractor_id = qr_data.get('id')
+                    if contractor_id:
+                        contractor = Contractor.objects.filter(id=contractor_id).first()
+                        if contractor:
+                            print(f"Found by ID from QR: {contractor.phone_number}")
+                    
+                    if not contractor:
+                        code = qr_data.get('code')
+                        if code:
+                            contractor = Contractor.objects.filter(access_code=code).first()
+                            if contractor:
+                                print(f"Found by code from QR: {contractor.phone_number}")
+                    
+                    if not contractor:
+                        phone = qr_data.get('phone')
+                        if phone:
+                            contractor = Contractor.objects.filter(phone_number=phone).first()
+                            if contractor:
+                                print(f"Found by phone from QR: {contractor.phone_number}")
+                                
+                except json.JSONDecodeError:
+                    print(f"Failed to parse QR data as JSON, treating as hash")
+                    contractor = Contractor.objects.filter(qr_code=qr_code_raw).first()
+                    if contractor:
+                        print(f"Found by qr_code field: {contractor.phone_number}")
+            
+            if not contractor and access_code:
                 contractor = Contractor.objects.filter(access_code=access_code).first()
-            elif qr_code:
-                contractor = Contractor.objects.filter(qr_code=qr_code).first()
+                if contractor:
+                    print(f"Found by access code: {contractor.phone_number}")
             
             if not contractor:
                 return Response({
@@ -444,14 +483,12 @@ class QRScanView(APIView):
                     'message': 'Подрядчик не найден'
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Проверяем верификацию
             if not contractor.is_verified:
                 return Response({
                     'success': False,
                     'message': 'Пользователь не верифицирован'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            # Проверяем доступ на сегодня
             today = timezone.now().date()
             access_entry = AccessList.objects.filter(
                 contractor=contractor,
@@ -476,7 +513,6 @@ class QRScanView(APIView):
                     'message': 'Срок действия доступа истек'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            # Проверяем статус на территории
             is_on_territory = access_entry.is_on_territory
             
             if access_type == 'entry' and is_on_territory:
@@ -491,7 +527,6 @@ class QRScanView(APIView):
                     'message': 'Пользователь не на территории'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Обновляем статус
             if access_type == 'entry':
                 access_entry.set_on_territory()
                 is_on_territory = True
@@ -501,22 +536,25 @@ class QRScanView(APIView):
                 is_on_territory = False
                 message = f'{contractor.get_full_name()} покинул территорию'
             
-            # Записываем лог
             scanned_by = None
             if guard_id:
                 scanned_by = Contractor.objects.filter(id=guard_id).first()
             elif guard_phone:
                 scanned_by = Contractor.objects.filter(phone_number=guard_phone).first()
             
-            AccessLog.objects.create(
+            access_log = AccessLog.objects.create(
                 contractor=contractor,
                 scanned_by=scanned_by,
                 access_code_entered=access_code,
-                qr_code_scanned=qr_code,
-                access_method='qr' if qr_code else 'code',
+                qr_code_scanned=qr_code_raw,
+                access_method='qr' if qr_code_raw else 'code',
                 access_type=access_type,
                 is_successful=True
             )
+            
+            photo_url = None
+            if contractor.photo:
+                photo_url = contractor.photo.url
             
             return Response({
                 'success': True,
@@ -528,10 +566,14 @@ class QRScanView(APIView):
                     'phone_number': contractor.phone_number,
                     'organization': contractor.organization,
                     'access_code': contractor.access_code,
-                    'photo': contractor.photo.url if contractor.photo else None
+                    'qr_code': contractor.qr_code,
+                    'photo': photo_url,
+                    'photo_url': photo_url
                 },
                 'valid_until': access_entry.valid_until,
-                'scanned_by': scanned_by.get_full_name() if scanned_by else None
+                'scanned_by': scanned_by.get_full_name() if scanned_by else None,
+                'scanned_by_name': scanned_by.get_full_name() if scanned_by else None,
+                'access_time': access_log.scanned_at
             })
             
         except Exception as e:
@@ -545,6 +587,8 @@ class QRScanView(APIView):
 
 
 # ========== ПОЛУЧЕНИЕ ИНФОРМАЦИИ О ПОДРЯДЧИКЕ ==========
+# backend/access_control/views.py
+
 @method_decorator(csrf_exempt, name='dispatch')
 class GetContractorInfoView(APIView):
     """Получение информации о подрядчике по QR-коду или коду доступа"""
@@ -553,13 +597,55 @@ class GetContractorInfoView(APIView):
     def post(self, request):
         try:
             access_code = request.data.get('access_code')
-            qr_code = request.data.get('qr_code')
+            qr_code_raw = request.data.get('qr_code')  # Это данные из QR (JSON строка)
+            
+            print(f"GetContractorInfoView: access_code={access_code}, qr_code_raw={qr_code_raw}")
             
             contractor = None
-            if access_code:
+            
+            # Пытаемся декодировать QR код
+            if qr_code_raw:
+                try:
+                    # Пробуем распарсить JSON из QR кода
+                    import json
+                    qr_data = json.loads(qr_code_raw)
+                    print(f"Decoded QR data: {qr_data}")
+                    
+                    # Ищем по ID из QR
+                    contractor_id = qr_data.get('id')
+                    if contractor_id:
+                        contractor = Contractor.objects.filter(id=contractor_id).first()
+                        if contractor:
+                            print(f"Found by ID from QR: {contractor.phone_number}")
+                    
+                    # Если не нашли по ID, ищем по code (access_code)
+                    if not contractor:
+                        code = qr_data.get('code')
+                        if code:
+                            contractor = Contractor.objects.filter(access_code=code).first()
+                            if contractor:
+                                print(f"Found by code from QR: {contractor.phone_number}")
+                    
+                    # Если не нашли, ищем по телефону
+                    if not contractor:
+                        phone = qr_data.get('phone')
+                        if phone:
+                            contractor = Contractor.objects.filter(phone_number=phone).first()
+                            if contractor:
+                                print(f"Found by phone from QR: {contractor.phone_number}")
+                                
+                except json.JSONDecodeError:
+                    print(f"Failed to parse QR data as JSON, treating as hash")
+                    # Если не JSON, пробуем найти по qr_code полю (старый способ)
+                    contractor = Contractor.objects.filter(qr_code=qr_code_raw).first()
+                    if contractor:
+                        print(f"Found by qr_code field: {contractor.phone_number}")
+            
+            # Если не нашли по QR, ищем по коду доступа
+            if not contractor and access_code:
                 contractor = Contractor.objects.filter(access_code=access_code).first()
-            elif qr_code:
-                contractor = Contractor.objects.filter(qr_code=qr_code).first()
+                if contractor:
+                    print(f"Found by access code: {contractor.phone_number}")
             
             if not contractor:
                 return Response({
@@ -582,6 +668,13 @@ class GetContractorInfoView(APIView):
             
             is_on_territory = access_entry.is_on_territory if access_entry else False
             valid_until = access_entry.valid_until if access_entry else None
+            is_allowed = access_entry.is_allowed if access_entry else False
+            ban_reason = access_entry.ban_reason if access_entry else None
+            
+            # Формируем URL фото
+            photo_url = None
+            if contractor.photo:
+                photo_url = contractor.photo.url
             
             return Response({
                 'success': True,
@@ -592,20 +685,25 @@ class GetContractorInfoView(APIView):
                     'phone_number': contractor.phone_number,
                     'organization': contractor.organization,
                     'access_code': contractor.access_code,
-                    'photo': contractor.photo.url if contractor.photo else None,
+                    'qr_code': contractor.qr_code,
+                    'photo': photo_url,
+                    'photo_url': photo_url,
                     'is_verified': contractor.is_verified
                 },
                 'is_on_territory': is_on_territory,
-                'valid_until': valid_until
+                'valid_until': valid_until,
+                'is_allowed': is_allowed,
+                'ban_reason': ban_reason
             })
             
         except Exception as e:
             print(f"GetContractorInfoView error: {e}")
+            import traceback
+            traceback.print_exc()
             return Response({
                 'success': False,
                 'message': f'Ошибка: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ========== ОСТАЛЬНЫЕ VIEW ==========
 
