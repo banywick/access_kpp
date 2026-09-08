@@ -56,6 +56,10 @@
           <div v-if="uploadError" class="error-message">
             {{ uploadError }}
           </div>
+          
+          <div v-if="uploadSuccess" class="success-message">
+            ✅ {{ uploadSuccess }}
+          </div>
         </div>
 
         <!-- QR код и код доступа -->
@@ -99,9 +103,9 @@
             <h3>📋 Информация о доступе</h3>
             <div class="info-grid">
               <div class="info-item">
-                <span class="info-label">Статус</span>
-                <span class="info-value status-active">
-                  ✅ Активен
+                <span class="info-label">Статус доступа</span>
+                <span class="info-value" :class="getAccessStatusClass(isAllowed)">
+                  {{ getAccessStatusText(isAllowed) }}
                 </span>
               </div>
               <div class="info-item">
@@ -115,6 +119,21 @@
               <div class="info-item" v-if="user.full_name">
                 <span class="info-label">ФИО</span>
                 <span class="info-value">{{ user.full_name }}</span>
+              </div>
+              <div class="info-item" v-if="validUntil">
+                <span class="info-label">Действителен до</span>
+                <span class="info-value">{{ formatDate(validUntil) }}</span>
+              </div>
+              <div class="info-item" v-if="daysRemaining !== null">
+                <span class="info-label">Дней доступа</span>
+                <span class="info-value" :class="getDaysClass(daysRemaining)">
+                  {{ formatDaysRemaining(daysRemaining) }}
+                </span>
+              </div>
+              <!-- Причина запрета - отдельное поле -->
+              <div class="info-item" v-if="banReason">
+                <span class="info-label">Комментарий</span>
+                <span class="info-value error-text">{{ banReason }}</span>
               </div>
             </div>
           </div>
@@ -132,6 +151,7 @@ export default {
   data() {
     return {
       user: {
+        id: null,
         full_name: '',
         first_name: '',
         last_name: '',
@@ -140,18 +160,26 @@ export default {
         is_verified: false,
         organization: '',
         role: 'contractor',
-        photo: null
+        photo: null,
+        access_code: null,
+        qr_code: null
       },
       previewImage: null,
       selectedFile: null,
       uploading: false,
       uploadError: null,
+      uploadSuccess: null,
       qrCode: null,
       qrImage: null,
       accessCode: null,
       qrLoading: false,
       qrError: null,
-      copied: false
+      copied: false,
+      daysRemaining: null,
+      validUntil: null,
+      isAllowed: false,
+      accessStatus: 'запрещен',
+      banReason: null
     }
   },
   mounted() {
@@ -193,7 +221,14 @@ export default {
           this.qrImage = response.data.qr_image
           this.accessCode = response.data.access_code
           
-          // Обновляем данные пользователя из ответа
+          // Получаем информацию о доступе из ответа
+          this.daysRemaining = response.data.days_remaining
+          this.validUntil = response.data.valid_until
+          this.isAllowed = response.data.is_allowed
+          this.accessStatus = response.data.access_status
+          this.banReason = response.data.ban_reason
+          
+          // Обновляем данные пользователя
           this.user = {
             ...this.user,
             full_name: response.data.full_name || this.user.full_name,
@@ -205,7 +240,6 @@ export default {
           }
           
           localStorage.setItem('userData', JSON.stringify(this.user))
-          this.$emit('verified')
         } else {
           this.qrError = response.data.message || 'Ошибка загрузки QR кода'
         }
@@ -218,9 +252,7 @@ export default {
             this.$router.push('/')
           }, 3000)
         } else if (error.response?.status === 403) {
-          this.qrError = 'Пользователь еще не верифицирован. Пожалуйста, подождите.'
-          // Пробуем обновить статус
-          await this.refreshUserStatus()
+          this.qrError = 'Пользователь еще не верифицирован.'
         } else {
           this.qrError = error.response?.data?.message || 'Ошибка загрузки QR кода'
         }
@@ -229,22 +261,44 @@ export default {
       }
     },
     
-    async refreshUserStatus() {
+    getAccessStatusText(isAllowed) {
+      if (isAllowed) {
+        return '✅ Разрешен'
+      }
+      return '❌ Запрещен'
+    },
+    
+    getAccessStatusClass(isAllowed) {
+      if (isAllowed) return 'success'
+      return 'error'
+    },
+    
+    formatDaysRemaining(days) {
+      if (days === null || days === undefined) return '—'
+      if (days === 0) return '⏰ Истек'
+      if (days < 0) return '⏰ Истек'
+      return days
+    },
+    
+    getDaysClass(days) {
+      if (days === null || days === undefined) return 'expired'
+      if (days === 0 || days < 0) return 'expired'
+      if (days <= 3) return 'danger'
+      if (days <= 7) return 'warning'
+      return 'success'
+    },
+    
+    formatDate(dateString) {
+      if (!dateString) return '-'
       try {
-        // Получаем актуальные данные пользователя
-        const userData = localStorage.getItem('userData')
-        if (userData) {
-          const parsed = JSON.parse(userData)
-          // Проверяем статус через API
-          const response = await api.get(`/contractors/${parsed.id}/`)
-          if (response.data && response.data.is_verified) {
-            this.user.is_verified = true
-            localStorage.setItem('userData', JSON.stringify({...parsed, is_verified: true}))
-            await this.loadQRCode()
-          }
-        }
-      } catch (error) {
-        console.error('Error refreshing user status:', error)
+        const date = new Date(dateString)
+        return date.toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        })
+      } catch {
+        return dateString
       }
     },
     
@@ -275,6 +329,7 @@ export default {
       
       this.selectedFile = file
       this.uploadError = null
+      this.uploadSuccess = null
       
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -291,6 +346,7 @@ export default {
       
       this.uploading = true
       this.uploadError = null
+      this.uploadSuccess = null
       
       const formData = new FormData()
       formData.append('photo', this.selectedFile)
@@ -305,38 +361,30 @@ export default {
         console.log('Upload response:', response.data)
         
         if (response.data.success) {
-          // Обновляем статус пользователя
           this.user.is_verified = true
-          if (response.data.photo_url) {
-            this.user.photo = response.data.photo_url
-          }
+          this.user.photo = response.data.photo_url
+          this.accessCode = response.data.access_code
+          this.qrCode = response.data.qr_code
           
-          // Сохраняем обновленные данные
           const currentData = JSON.parse(localStorage.getItem('userData') || '{}')
           const updatedData = {
             ...currentData,
             ...this.user,
             is_verified: true,
-            photo: response.data.photo_url || currentData.photo
+            photo: response.data.photo_url || currentData.photo,
+            access_code: response.data.access_code,
+            qr_code: response.data.qr_code
           }
           localStorage.setItem('userData', JSON.stringify(updatedData))
           
-          this.uploadError = null
+          this.uploadSuccess = 'Фото загружено! Вы верифицированы.'
           this.previewImage = null
           this.selectedFile = null
           
-          // Показываем сообщение об успехе
-          alert('✅ Фото успешно загружено! QR код будет сгенерирован.')
+          setTimeout(() => {
+            this.loadQRCode()
+          }, 500)
           
-          // Загружаем QR код
-          await this.loadQRCode()
-          
-          // Если QR не загрузился, обновляем страницу
-          if (!this.qrImage && !this.qrError) {
-            setTimeout(() => {
-              this.loadQRCode()
-            }, 2000)
-          }
         } else {
           this.uploadError = response.data.message || 'Ошибка загрузки фото'
         }
@@ -390,7 +438,6 @@ export default {
 </script>
 
 <style scoped>
-/* Стили остаются без изменений */
 .contractor-view {
   min-height: 100vh;
   background: #f5f7fa;
@@ -546,6 +593,16 @@ export default {
   color: #c62828;
   border-radius: 8px;
   font-size: 14px;
+}
+
+.success-message {
+  margin-top: 12px;
+  padding: 12px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 8px;
+  font-size: 14px;
+  border: 1px solid #a5d6a7;
 }
 
 .qr-section {
@@ -719,6 +776,30 @@ export default {
 .info-value {
   color: #1a237e;
   font-weight: 600;
+}
+
+.info-value.success {
+  color: #2e7d32;
+}
+
+.info-value.error {
+  color: #c62828;
+}
+
+.info-value.warning {
+  color: #e65100;
+}
+
+.info-value.danger {
+  color: #c62828;
+}
+
+.info-value.expired {
+  color: #999;
+}
+
+.error-text {
+  color: #c62828;
 }
 
 .status-active {

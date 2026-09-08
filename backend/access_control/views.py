@@ -222,7 +222,7 @@ class LoginView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class GetQRView(APIView):
-    """Получить QR код и код доступа"""
+    """Получить QR код и код доступа с информацией о сроке действия"""
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
@@ -253,6 +253,42 @@ class GetQRView(APIView):
             # Используем функцию из utils
             qr_image = generate_qr_code_image(qr_data)
             
+            # Получаем информацию о доступе
+            today = timezone.now().date()
+            access_entry = AccessList.objects.filter(
+                contractor=user,
+                date=today
+            ).first()
+            
+            valid_until = None
+            days_remaining = None
+            is_allowed = False
+            access_status = 'запрещен'
+            ban_reason = None
+            
+            if access_entry:
+                valid_until = access_entry.valid_until
+                is_allowed = access_entry.is_allowed
+                ban_reason = access_entry.ban_reason
+                
+                # Проверяем срок действия
+                if is_allowed and valid_until:
+                    days_remaining = (valid_until - today).days
+                    if days_remaining < 0:
+                        days_remaining = 0
+                        is_allowed = False
+                        access_status = 'просрочен'
+                    else:
+                        access_status = 'разрешен'
+                elif not is_allowed:
+                    access_status = 'запрещен'
+                    if ban_reason:
+                        access_status = f'запрещен'
+            else:
+                # Нет записи о доступе
+                is_allowed = False
+                access_status = 'не найден'
+            
             # Формируем URL фото
             photo_url = None
             if user.photo:
@@ -266,9 +302,14 @@ class GetQRView(APIView):
                 'access_code': user.access_code,
                 'full_name': user.get_full_name(),
                 'phone': user.phone_number,
-                'photo': photo_url,  # Добавляем фото
+                'photo': photo_url,
                 'organization': user.organization,
-                'is_verified': user.is_verified
+                'is_verified': user.is_verified,
+                'valid_until': valid_until,
+                'days_remaining': days_remaining,
+                'is_allowed': is_allowed,
+                'access_status': access_status,
+                'ban_reason': ban_reason
             })
             
         except Exception as e:
@@ -279,7 +320,6 @@ class GetQRView(APIView):
                 'success': False,
                 'message': f'Ошибка получения QR кода: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ========== VIEWSETS ==========
 class ContractorViewSet(viewsets.ModelViewSet):
@@ -580,6 +620,7 @@ class ContractorRegisterView(APIView):
 
 
 class ContractorPhotoView(APIView):
+    """Шаг 2: Загрузка фото и автоматическая верификация"""
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
@@ -593,15 +634,49 @@ class ContractorPhotoView(APIView):
                     'message': 'Фото не загружено'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Проверяем размер файла (максимум 5MB)
+            if photo.size > 5 * 1024 * 1024:
+                return Response({
+                    'success': False,
+                    'message': 'Файл слишком большой. Максимальный размер 5MB'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Проверяем формат
+            import imghdr
+            file_format = imghdr.what(photo)
+            valid_formats = ['jpeg', 'jpg', 'png', 'gif']
+            
+            if file_format not in valid_formats:
+                return Response({
+                    'success': False,
+                    'message': f'Неверный формат файла. Допустимые: {", ".join(valid_formats)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Сохраняем фото
             user.photo = photo
             user.save()
             
+            # Автоматически верифицируем пользователя
+            if not user.is_verified:
+                user.verify_user()  # Этот метод генерирует QR код, access code и создает доступ
+                print(f"✅ User {user.phone_number} automatically verified after photo upload")
+            
+            # Формируем URL фото
+            photo_url = user.photo.url if user.photo else None
+            
             return Response({
                 'success': True,
-                'message': 'Фото загружено'
+                'message': 'Фото загружено. Пользователь верифицирован.',
+                'is_verified': user.is_verified,
+                'photo_url': photo_url,
+                'access_code': user.access_code,
+                'qr_code': user.qr_code
             })
+            
         except Exception as e:
             print(f"ContractorPhotoView error: {e}")
+            import traceback
+            traceback.print_exc()
             return Response({
                 'success': False,
                 'message': f'Ошибка: {str(e)}'
