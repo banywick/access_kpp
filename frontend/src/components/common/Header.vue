@@ -34,7 +34,7 @@
         <div class="user-avatar">
           <img 
             v-if="userData.photo" 
-            :src="getPhotoUrl(userData.photo)" 
+            :src="getImageUrl(userData.photo)" 
             :alt="userData.full_name || userData.first_name"
             class="avatar-image"
             @error="handleAvatarError"
@@ -69,7 +69,7 @@
           <div class="user-modal-avatar">
             <img 
               v-if="userData?.photo" 
-              :src="getPhotoUrl(userData.photo)" 
+              :src="getImageUrl(userData.photo)" 
               :alt="userData.full_name"
               class="modal-avatar-image"
               @error="handleAvatarError"
@@ -139,23 +139,24 @@ export default {
       }
     },
     
-    getPhotoUrl(photoPath) {
+    getImageUrl(photoPath) {
       if (!photoPath) return ''
-      
-      // Если уже есть полный URL
-      if (photoPath.startsWith('http')) return photoPath
-      
-      // Если путь начинается с /media/ - используем через прокси
+      // Если уже есть http - возвращаем как есть (но лучше такого не допускать)
+      if (photoPath.startsWith('http')) {
+        // Если это backend:8000 - заменяем на относительный путь
+        if (photoPath.includes('backend:8000')) {
+          const pathMatch = photoPath.match(/\/media\/.*/)
+          if (pathMatch) {
+            return pathMatch[0]
+          }
+        }
+        return photoPath
+      }
+      // Если путь начинается с /media/ - возвращаем как есть
       if (photoPath.startsWith('/media/')) {
         return photoPath
       }
-      
-      // Если путь начинается с media/ без слеша
-      if (photoPath.startsWith('media/')) {
-        return '/' + photoPath
-      }
-      
-      // В остальных случаях добавляем /media/
+      // Иначе добавляем /media/
       return `/media/${photoPath}`
     },
     
@@ -169,7 +170,6 @@ export default {
     },
     
     handleAvatarError(e) {
-      console.log('❌ Ошибка загрузки фото:', e.target.src)
       e.target.style.display = 'none'
       const parent = e.target.parentElement
       const placeholder = parent?.querySelector('.avatar-placeholder')
@@ -219,6 +219,7 @@ export default {
 </script>
 
 <style scoped>
+/* Стили остаются без изменений */
 .header {
   background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
   color: white;
@@ -307,7 +308,6 @@ export default {
   font-size: 20px;
 }
 
-/* Профиль пользователя */
 .user-profile {
   display: flex;
   align-items: center;
@@ -408,7 +408,6 @@ export default {
   transform: rotate(-45deg) translate(5px, -6px);
 }
 
-/* Модальное окно профиля */
 .user-modal-overlay {
   position: fixed;
   top: 0;

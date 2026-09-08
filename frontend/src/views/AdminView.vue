@@ -76,9 +76,29 @@
       <div v-if="activeTab === 'contractors'" class="tab-content">
         <div class="section-header">
           <h2>👥 Список подрядчиков</h2>
-          <button class="add-btn" @click="showAddModal = true">
-            ➕ Добавить подрядчика
-          </button>
+          <div class="filter-group">
+            <button 
+              class="filter-btn" 
+              :class="{ active: territoryFilter === 'all' }"
+              @click="territoryFilter = 'all'"
+            >
+              Все
+            </button>
+            <button 
+              class="filter-btn" 
+              :class="{ active: territoryFilter === 'on' }"
+              @click="territoryFilter = 'on'"
+            >
+              📍 На территории
+            </button>
+            <button 
+              class="filter-btn" 
+              :class="{ active: territoryFilter === 'off' }"
+              @click="territoryFilter = 'off'"
+            >
+              🚫 Не на территории
+            </button>
+          </div>
         </div>
 
         <div class="table-container">
@@ -96,7 +116,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="contractor in contractors" :key="contractor.id">
+              <tr v-for="contractor in paginatedContractors" :key="contractor.id">
                 <td>{{ contractor.full_name || 'Не указано' }}</td>
                 <td>{{ contractor.phone_number }}</td>
                 <td>{{ contractor.organization || 'Не указана' }}</td>
@@ -119,8 +139,8 @@
                 <td>
                   <div class="photo-cell" @click="openPhotoModal(contractor)">
                     <img 
-                      v-if="contractor.photo" 
-                      :src="getImageUrl(contractor.photo)" 
+                      v-if="contractor.photo_url || contractor.photo" 
+                      :src="getImageUrl(contractor.photo_url || contractor.photo)" 
                       class="mini-photo"
                       @error="handleImageError"
                       :alt="contractor.full_name"
@@ -132,15 +152,36 @@
                   <button class="action-btn delete" @click="deleteContractor(contractor.id)">🗑️</button>
                 </td>
               </tr>
-              <tr v-if="contractors.length === 0">
+              <tr v-if="filteredContractors.length === 0">
                 <td colspan="8" class="empty-state">
                   <span class="empty-icon">📭</span>
                   <p>Нет подрядчиков</p>
-                  <p class="empty-hint">Нажмите "Добавить подрядчика" чтобы создать</p>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Пагинация -->
+        <div v-if="totalPages > 1" class="pagination">
+          <button 
+            class="page-btn" 
+            :disabled="currentPage === 1"
+            @click="currentPage--"
+          >
+            ◀
+          </button>
+          <span class="page-info">
+            {{ currentPage }} / {{ totalPages }}
+          </span>
+          <button 
+            class="page-btn" 
+            :disabled="currentPage === totalPages"
+            @click="currentPage++"
+          >
+            ▶
+          </button>
+          <span class="total-items">Всего: {{ filteredContractors.length }}</span>
         </div>
       </div>
 
@@ -226,7 +267,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Время</th>
+                <th>Дата и время</th>
                 <th>Подрядчик</th>
                 <th>Телефон</th>
                 <th>Организация</th>
@@ -238,7 +279,7 @@
             </thead>
             <tbody>
               <tr v-for="log in accessLogs" :key="log.id">
-                <td>{{ formatDate(log.scanned_at) }}</td>
+                <td>{{ formatDateTime(log.scanned_at) }}</td>
                 <td>{{ log.contractor_info?.full_name || 'Не указано' }}</td>
                 <td>{{ log.contractor_info?.phone_number || '-' }}</td>
                 <td>{{ log.contractor_info?.organization || '-' }}</td>
@@ -272,95 +313,12 @@
       </div>
     </div>
 
-    <!-- Модальное окно добавления подрядчика -->
-    <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
-      <div class="modal">
-        <div class="modal-header">
-          <h2>➕ Добавить подрядчика</h2>
-          <button class="close-btn" @click="showAddModal = false">✕</button>
-        </div>
-        
-        <form @submit.prevent="addContractor" class="modal-form">
-          <div class="form-group">
-            <label>Номер телефона *</label>
-            <input 
-              v-model="newContractor.phone_number" 
-              type="tel" 
-              placeholder="+375 (29) 123-45-67"
-              required
-            />
-          </div>
-          
-          <div class="form-row">
-            <div class="form-group">
-              <label>Имя *</label>
-              <input 
-                v-model="newContractor.first_name" 
-                type="text" 
-                placeholder="Иван"
-                required
-              />
-            </div>
-            <div class="form-group">
-              <label>Фамилия *</label>
-              <input 
-                v-model="newContractor.last_name" 
-                type="text" 
-                placeholder="Петров"
-                required
-              />
-            </div>
-          </div>
-          
-          <div class="form-group">
-            <label>Отчество</label>
-            <input 
-              v-model="newContractor.patronymic" 
-              type="text" 
-              placeholder="Иванович"
-            />
-          </div>
-          
-          <div class="form-group">
-            <label>Организация *</label>
-            <input 
-              v-model="newContractor.organization" 
-              type="text" 
-              placeholder="Название организации"
-              required
-            />
-          </div>
-          
-          <div class="form-group">
-            <label>Фото</label>
-            <input 
-              type="file" 
-              accept="image/*"
-              @change="handlePhotoUpload"
-            />
-            <div v-if="photoPreview" class="photo-preview">
-              <img :src="photoPreview" alt="Preview" />
-              <button type="button" class="remove-photo" @click="removePhoto">✕</button>
-            </div>
-          </div>
-          
-          <div class="form-actions">
-            <button type="button" class="cancel-btn" @click="showAddModal = false">Отмена</button>
-            <button type="submit" class="submit-btn" :disabled="isLoading">
-              <span v-if="isLoading" class="spinner"></span>
-              <span v-else>💾 Сохранить</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
     <!-- Модальное окно для увеличения фото -->
     <div v-if="showPhotoModal" class="photo-modal" @click="closePhotoModal">
       <div class="photo-modal-content" @click.stop>
         <button class="modal-close-btn" @click="closePhotoModal">✕</button>
         <img 
-          :src="getImageUrl(selectedContractor?.photo)" 
+          :src="getImageUrl(selectedContractor?.photo_url || selectedContractor?.photo)" 
           :alt="selectedContractor?.full_name"
           class="modal-photo"
           @error="handleImageError"
@@ -379,7 +337,7 @@
 </template>
 
 <script>
-import api from '@/config/axios'
+import api from '../config/axios'
 
 export default {
   name: 'AdminView',
@@ -389,7 +347,6 @@ export default {
       userRole: null,
       
       activeTab: 'contractors',
-      showAddModal: false,
       isLoading: false,
       selectedDate: new Date().toISOString().split('T')[0],
       
@@ -398,24 +355,48 @@ export default {
       accessList: [],
       accessLogs: [],
       
+      // Статистика
       totalContractors: 0,
       contractorsOnTerritory: 0,
       contractorsOffTerritory: 0,
       verifiedContractors: 0,
       
-      newContractor: {
-        phone_number: '',
-        first_name: '',
-        last_name: '',
-        patronymic: '',
-        organization: '',
-        photo: null
-      },
+      // Фильтры
+      territoryFilter: 'all',
       
-      photoPreview: null,
+      // Пагинация
+      currentPage: 1,
+      itemsPerPage: 10,
       
       showPhotoModal: false,
       selectedContractor: null
+    }
+  },
+  computed: {
+    // Фильтруем только верифицированных подрядчиков
+    filteredContractors() {
+      // Сначала фильтруем только верифицированных
+      let filtered = this.contractors.filter(c => c.is_verified === true)
+      
+      // Затем применяем фильтр по территории
+      if (this.territoryFilter === 'on') {
+        filtered = filtered.filter(c => this.getTerritoryStatus(c) === true)
+      } else if (this.territoryFilter === 'off') {
+        filtered = filtered.filter(c => this.getTerritoryStatus(c) === false)
+      }
+      
+      return filtered
+    },
+    
+    // Пагинированные данные
+    paginatedContractors() {
+      const start = (this.currentPage - 1) * this.itemsPerPage
+      const end = start + this.itemsPerPage
+      return this.filteredContractors.slice(start, end)
+    },
+    
+    totalPages() {
+      return Math.ceil(this.filteredContractors.length / this.itemsPerPage)
     }
   },
   mounted() {
@@ -433,10 +414,24 @@ export default {
   methods: {
     getImageUrl(photoPath) {
       if (!photoPath) return ''
-      if (photoPath.startsWith('http')) return photoPath
+      // Если уже есть полный URL с http
+      if (photoPath.startsWith('http')) {
+        // Пытаемся извлечь относительный путь /media/...
+        const pathMatch = photoPath.match(/\/media\/.*/)
+        if (pathMatch) {
+          return pathMatch[0]
+        }
+        return photoPath
+      }
+      // Если путь начинается с /media/ - возвращаем как есть
       if (photoPath.startsWith('/media/')) {
         return photoPath
       }
+      // Если путь начинается с photos/ (без /media/)
+      if (photoPath.startsWith('photos/')) {
+        return `/media/${photoPath}`
+      }
+      // Иначе добавляем /media/
       return `/media/${photoPath}`
     },
     
@@ -534,12 +529,15 @@ export default {
           return true
         })
         
-        this.updateStats()
+        // Преобразуем photo в photo_url если нужно
+        this.contractors = this.contractors.map(c => {
+          if (c.photo && !c.photo_url) {
+            c.photo_url = c.photo
+          }
+          return c
+        })
         
-        console.log('📊 Все пользователи:', this.allUsers.length)
-        console.log('✅ Отфильтровано подрядчиков:', this.contractors.length)
-        console.log('📊 На территории:', this.contractorsOnTerritory)
-        console.log('📊 Не на территории:', this.contractorsOffTerritory)
+        this.updateStats()
       } catch (error) {
         console.error('❌ Ошибка загрузки подрядчиков:', error)
       }
@@ -562,59 +560,9 @@ export default {
           params: { date: this.selectedDate }
         })
         this.accessLogs = response.data.results || response.data || []
-        console.log('📊 Загружено логов:', this.accessLogs.length)
         this.updateStats()
       } catch (error) {
         console.error('Ошибка загрузки логов:', error)
-      }
-    },
-    
-    async addContractor() {
-      if (!this.newContractor.phone_number || !this.newContractor.first_name || 
-          !this.newContractor.last_name || !this.newContractor.organization) {
-        alert('Заполните обязательные поля: Телефон, Имя, Фамилия, Организация')
-        return
-      }
-      
-      this.isLoading = true
-      
-      try {
-        const formData = new FormData()
-        formData.append('phone_number', this.newContractor.phone_number)
-        formData.append('first_name', this.newContractor.first_name)
-        formData.append('last_name', this.newContractor.last_name)
-        formData.append('organization', this.newContractor.organization)
-        formData.append('role', 'contractor')
-        if (this.newContractor.patronymic) {
-          formData.append('patronymic', this.newContractor.patronymic)
-        }
-        if (this.newContractor.photo) {
-          formData.append('photo', this.newContractor.photo)
-        }
-        
-        const response = await api.post('/contractors/', formData, {
-          headers: { 
-            'Content-Type': 'multipart/form-data',
-          }
-        })
-        
-        this.showAddModal = false
-        this.resetForm()
-        await this.loadContractors()
-        await this.loadAccessList()
-        
-        alert('✅ Подрядчик успешно добавлен!')
-      } catch (error) {
-        console.error('Ошибка добавления:', error)
-        let errorMsg = 'Неизвестная ошибка'
-        if (error.response) {
-          errorMsg = error.response.data?.detail || 
-                     error.response.data?.error || 
-                     JSON.stringify(error.response.data)
-        }
-        alert('❌ Ошибка добавления: ' + errorMsg)
-      } finally {
-        this.isLoading = false
       }
     },
     
@@ -647,34 +595,20 @@ export default {
       }
     },
     
-    handlePhotoUpload(event) {
-      const file = event.target.files[0]
-      if (file) {
-        this.newContractor.photo = file
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          this.photoPreview = e.target.result
-        }
-        reader.readAsDataURL(file)
+    formatDateTime(dateString) {
+      if (!dateString) return '-'
+      try {
+        const date = new Date(dateString)
+        return date.toLocaleString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      } catch {
+        return dateString
       }
-    },
-    
-    removePhoto() {
-      this.newContractor.photo = null
-      this.photoPreview = null
-      this.$refs.fileInput.value = ''
-    },
-    
-    resetForm() {
-      this.newContractor = {
-        phone_number: '',
-        first_name: '',
-        last_name: '',
-        patronymic: '',
-        organization: '',
-        photo: null
-      }
-      this.photoPreview = null
     },
     
     formatDate(dateString) {
@@ -692,7 +626,7 @@ export default {
     },
     
     openPhotoModal(contractor) {
-      if (!contractor?.photo) {
+      if (!contractor?.photo_url && !contractor?.photo) {
         console.log('Нет фото для увеличения')
         return
       }
@@ -705,6 +639,11 @@ export default {
       this.showPhotoModal = false
       this.selectedContractor = null
       document.body.style.overflow = ''
+    }
+  },
+  watch: {
+    territoryFilter() {
+      this.currentPage = 1
     }
   },
   beforeUnmount() {
@@ -744,6 +683,7 @@ export default {
   font-size: 16px;
 }
 
+/* Дашборд статистики */
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -864,21 +804,30 @@ export default {
   color: #1a237e;
 }
 
-.add-btn {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.3s;
+.filter-group {
+  display: flex;
+  gap: 8px;
 }
 
-.add-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3);
+.filter-btn {
+  padding: 6px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 20px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s;
+  color: #666;
+}
+
+.filter-btn:hover {
+  border-color: #1a237e;
+}
+
+.filter-btn.active {
+  background: #1a237e;
+  color: white;
+  border-color: #1a237e;
 }
 
 .table-container {
@@ -1106,10 +1055,49 @@ export default {
   margin-bottom: 10px;
 }
 
-.empty-hint {
+/* Пагинация */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.page-btn {
+  padding: 8px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #1a237e;
+  color: white;
+  border-color: #1a237e;
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-info {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.total-items {
   font-size: 13px;
-  color: #bbb;
-  margin-top: 5px;
+  color: #999;
+  margin-left: 10px;
 }
 
 .modal-overlay {
@@ -1156,117 +1144,6 @@ export default {
   font-size: 24px;
   cursor: pointer;
   color: #666;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.form-group label {
-  font-weight: 600;
-  color: #333;
-  font-size: 14px;
-}
-
-.form-group input {
-  padding: 10px 12px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: border-color 0.3s;
-}
-
-.form-group input:focus {
-  outline: none;
-  border-color: #1a237e;
-}
-
-.photo-preview {
-  position: relative;
-  margin-top: 10px;
-  width: 100px;
-}
-
-.photo-preview img {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid #e0e0e0;
-}
-
-.remove-photo {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: none;
-  background: #c62828;
-  color: white;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 10px;
-}
-
-.cancel-btn {
-  padding: 10px 20px;
-  background: #f5f5f5;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.submit-btn {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.submit-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.spinner {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 3px solid rgba(255,255,255,0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .date-selector input {
@@ -1440,17 +1317,9 @@ export default {
     padding: 8px 14px;
   }
   
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-  
   .section-header {
     flex-direction: column;
     align-items: stretch;
-  }
-  
-  .modal {
-    padding: 20px;
   }
   
   .photo-modal-content {
@@ -1469,6 +1338,10 @@ export default {
   
   .dashboard-stats {
     grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .filter-group {
+    flex-wrap: wrap;
   }
 }
 
@@ -1539,6 +1412,10 @@ export default {
     font-size: 24px;
     width: 40px;
     height: 40px;
+  }
+  
+  .pagination {
+    flex-wrap: wrap;
   }
 }
 </style>
