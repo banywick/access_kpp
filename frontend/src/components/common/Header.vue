@@ -2,63 +2,68 @@
 <template>
   <header class="header" v-if="showHeader">
     <div class="header-container">
-      <div class="logo" @click="goHome">
-        <span class="logo-icon">🏢</span>
-        <span class="logo-text">Электронный пропуск</span>
+      <div class="header-left">
+        <div class="logo" @click="goHome">
+          <span class="logo-icon">🏢</span>
+          <span class="logo-text">Электронный пропуск</span>
+        </div>
       </div>
       
-      <nav class="nav-menu" :class="{ 'nav-open': isMenuOpen }">
-        <router-link v-if="userRole === 'contractor'" to="/dashboard" class="nav-link" @click="closeMenu">
-          <span class="nav-icon">👤</span>
-          <span>Мой пропуск</span>
-        </router-link>
-        
-        <router-link v-if="userRole === 'guard' || userRole === 'admin'" to="/dashboard-admin" class="nav-link" @click="closeMenu">
-          <span class="nav-icon">🛡️</span>
-          <span>Панель управления</span>
-        </router-link>
-        
-        <router-link v-if="userRole === 'guard'" to="/guard" class="nav-link" @click="closeMenu">
-          <span class="nav-icon">📷</span>
-          <span>Охрана</span>
-        </router-link>
-        
-        <button class="nav-link logout-link" @click="handleLogout">
-          <span class="nav-icon">🚪</span>
-          <span>Выйти</span>
-        </button>
-      </nav>
+      <div class="header-center">
+        <nav class="nav-menu" :class="{ 'nav-open': isMenuOpen }">
+          <router-link v-if="userRole === 'contractor'" to="/dashboard" class="nav-link" @click="closeMenu">
+            <span class="nav-icon">👤</span>
+            <span>Мой пропуск</span>
+          </router-link>
+          
+          <router-link v-if="userRole === 'guard' || userRole === 'admin'" to="/dashboard-admin" class="nav-link" @click="closeMenu">
+            <span class="nav-icon">🛡️</span>
+            <span>Панель управления</span>
+          </router-link>
+          
+          <router-link v-if="userRole === 'guard'" to="/guard" class="nav-link" @click="closeMenu">
+            <span class="nav-icon">📷</span>
+            <span>Охрана</span>
+          </router-link>
+          
+          <button class="nav-link logout-link" @click="handleLogout">
+            <span class="nav-icon">🚪</span>
+            <span>Выйти</span>
+          </button>
+        </nav>
+      </div>
       
-      <!-- Профиль пользователя -->
-      <div class="user-profile" v-if="userData" @click="openUserModal">
-        <div class="user-avatar">
-          <img 
-            v-if="userData.photo" 
-            :src="getImageUrl(userData.photo)" 
-            :alt="userData.full_name || userData.first_name"
-            class="avatar-image"
-            @error="handleAvatarError"
-          />
-          <span v-else class="avatar-placeholder">
-            {{ getInitials(userData.full_name || userData.first_name || 'Пользователь') }}
+      <div class="header-right">
+        <div class="user-profile" v-if="userData" @click="openUserModal">
+          <div class="user-avatar">
+            <img 
+              v-if="userData.photo_url || userData.photo" 
+              :src="getImageUrl(userData.photo_url || userData.photo)" 
+              :alt="userData.full_name || userData.first_name"
+              class="avatar-image"
+              @error="handleAvatarError"
+            />
+            <span v-else class="avatar-placeholder">
+              {{ getInitials(userData.full_name || userData.first_name || 'Пользователь') }}
+            </span>
+          </div>
+          <div class="user-info">
+            <span class="user-name">{{ userData.full_name || userData.first_name || 'Пользователь' }}</span>
+            <span class="user-phone">{{ userData.phone || userData.phone_number || '' }}</span>
+          </div>
+        </div>
+        
+        <button class="menu-toggle" @click="toggleMenu" aria-label="Меню">
+          <span class="menu-icon" :class="{ 'menu-open': isMenuOpen }">
+            <span></span>
+            <span></span>
+            <span></span>
           </span>
-        </div>
-        <div class="user-info">
-          <span class="user-name">{{ userData.full_name || userData.first_name || 'Пользователь' }}</span>
-          <span class="user-phone">{{ userData.phone || userData.phone_number || '' }}</span>
-        </div>
+        </button>
       </div>
-      
-      <button class="menu-toggle" @click="toggleMenu" aria-label="Меню">
-        <span class="menu-icon" :class="{ 'menu-open': isMenuOpen }">
-          <span></span>
-          <span></span>
-          <span></span>
-        </span>
-      </button>
     </div>
 
-    <!-- Модальное окно с информацией о пользователе -->
+    <!-- Модальное окно профиля -->
     <div v-if="showUserModal" class="user-modal-overlay" @click.self="closeUserModal">
       <div class="user-modal">
         <div class="user-modal-header">
@@ -68,8 +73,8 @@
         <div class="user-modal-body">
           <div class="user-modal-avatar">
             <img 
-              v-if="userData?.photo" 
-              :src="getImageUrl(userData.photo)" 
+              v-if="userData?.photo_url || userData?.photo" 
+              :src="getImageUrl(userData?.photo_url || userData?.photo)" 
               :alt="userData.full_name"
               class="modal-avatar-image"
               @error="handleAvatarError"
@@ -117,6 +122,11 @@ export default {
   },
   mounted() {
     this.checkAuth()
+    // Закрываем меню при изменении размера окна
+    window.addEventListener('resize', this.handleResize)
+  },
+  beforeUnmount() {
+    window.removeEventListener('resize', this.handleResize)
   },
   methods: {
     checkAuth() {
@@ -129,7 +139,6 @@ export default {
           this.userRole = role
           this.userData = JSON.parse(userDataStr)
           this.showHeader = true
-          console.log('Header userData:', this.userData)
         } catch (e) {
           console.error('Ошибка парсинга userData:', e)
           this.showHeader = false
@@ -139,24 +148,25 @@ export default {
       }
     },
     
+    handleResize() {
+      // Закрываем меню при переключении на десктопный размер
+      if (window.innerWidth > 768 && this.isMenuOpen) {
+        this.isMenuOpen = false
+      }
+    },
+    
     getImageUrl(photoPath) {
       if (!photoPath) return ''
-      // Если уже есть http - возвращаем как есть (но лучше такого не допускать)
       if (photoPath.startsWith('http')) {
-        // Если это backend:8000 - заменяем на относительный путь
-        if (photoPath.includes('backend:8000')) {
-          const pathMatch = photoPath.match(/\/media\/.*/)
-          if (pathMatch) {
-            return pathMatch[0]
-          }
+        const pathMatch = photoPath.match(/\/media\/.*/)
+        if (pathMatch) {
+          return pathMatch[0]
         }
         return photoPath
       }
-      // Если путь начинается с /media/ - возвращаем как есть
       if (photoPath.startsWith('/media/')) {
         return photoPath
       }
-      // Иначе добавляем /media/
       return `/media/${photoPath}`
     },
     
@@ -180,13 +190,21 @@ export default {
     
     toggleMenu() {
       this.isMenuOpen = !this.isMenuOpen
+      // Блокируем скролл при открытом меню на мобильных
+      if (this.isMenuOpen && window.innerWidth <= 768) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
     },
     
     closeMenu() {
       this.isMenuOpen = false
+      document.body.style.overflow = ''
     },
     
     goHome() {
+      this.closeMenu()
       this.$router.push('/')
     },
     
@@ -206,6 +224,7 @@ export default {
         localStorage.removeItem('userData')
         this.showHeader = false
         this.showUserModal = false
+        this.closeMenu()
         this.$router.push('/')
       }
     }
@@ -213,13 +232,13 @@ export default {
   watch: {
     '$route.path'() {
       this.checkAuth()
+      this.closeMenu()
     }
   }
 }
 </script>
 
 <style scoped>
-/* Стили остаются без изменений */
 .header {
   background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
   color: white;
@@ -236,7 +255,29 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 15px;
+  gap: 10px;
+  min-height: 60px;
+}
+
+/* Левая часть - логотип */
+.header-left {
+  flex-shrink: 0;
+}
+
+/* Центральная часть - навигация */
+.header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Правая часть - профиль и меню */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .logo {
@@ -246,7 +287,6 @@ export default {
   font-size: 20px;
   font-weight: bold;
   cursor: pointer;
-  flex-shrink: 0;
 }
 
 .logo:hover {
@@ -263,26 +303,25 @@ export default {
 
 .nav-menu {
   display: flex;
-  gap: 20px;
+  gap: 5px;
   align-items: center;
-  flex: 1;
-  justify-content: center;
 }
 
 .nav-link {
   color: rgba(255, 255, 255, 0.9);
   text-decoration: none;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-radius: 8px;
   transition: all 0.3s;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
+  font-size: 15px;
   background: none;
   border: none;
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -305,15 +344,16 @@ export default {
 }
 
 .nav-icon {
-  font-size: 20px;
+  font-size: 18px;
 }
 
+/* Профиль пользователя */
 .user-profile {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   cursor: pointer;
-  padding: 4px 12px 4px 8px;
+  padding: 4px 10px 4px 6px;
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.1);
   transition: background 0.3s;
@@ -325,8 +365,8 @@ export default {
 }
 
 .user-avatar {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.3);
@@ -344,7 +384,7 @@ export default {
 }
 
 .avatar-placeholder {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: white;
   display: flex;
@@ -359,33 +399,47 @@ export default {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  min-width: 0;
 }
 
 .user-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 }
 
 .user-phone {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.7;
   color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 }
 
+/* Кнопка меню (бургер) */
 .menu-toggle {
   display: none;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 5px;
+  padding: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
 }
 
 .menu-icon {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  width: 28px;
+  width: 26px;
 }
 
 .menu-icon span {
@@ -408,6 +462,7 @@ export default {
   transform: rotate(-45deg) translate(5px, -6px);
 }
 
+/* Модальное окно профиля */
 .user-modal-overlay {
   position: fixed;
   top: 0;
@@ -430,6 +485,8 @@ export default {
   width: 100%;
   overflow: hidden;
   animation: slideIn 0.3s ease;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .user-modal-header {
@@ -453,6 +510,8 @@ export default {
   cursor: pointer;
   color: #666;
   transition: transform 0.3s;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .user-modal-header .close-btn:hover {
@@ -528,6 +587,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
 }
 
 .logout-btn-modal:hover {
@@ -545,80 +605,197 @@ export default {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ========== АДАПТИВНОСТЬ ========== */
+
+/* Планшеты (768px - 1024px) */
+@media (max-width: 1024px) {
+  .header-container {
+    padding: 10px 16px;
+  }
+  
+  .nav-link {
+    padding: 6px 12px;
+    font-size: 14px;
+  }
+  
+  .user-name {
+    max-width: 100px;
+    font-size: 12px;
+  }
+  
+  .user-phone {
+    max-width: 100px;
+    font-size: 10px;
+  }
+}
+
+/* Смартфоны (до 768px) */
 @media (max-width: 768px) {
   .header-container {
-    padding: 10px 15px;
-    flex-wrap: wrap;
+    padding: 8px 12px;
+    min-height: 52px;
+    gap: 8px;
   }
   
   .logo-text {
-    font-size: 18px;
+    font-size: 16px;
+  }
+  
+  .logo-icon {
+    font-size: 24px;
   }
   
   .menu-toggle {
-    display: block;
+    display: flex;
+  }
+  
+  .header-center {
+    position: static;
   }
   
   .nav-menu {
-    position: absolute;
-    top: 100%;
+    position: fixed;
+    top: 0;
     left: 0;
     right: 0;
+    bottom: 0;
     background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
     flex-direction: column;
-    padding: 20px;
-    gap: 10px;
-    transform: translateY(-120%);
+    padding: 80px 20px 30px;
+    gap: 8px;
+    transform: translateX(100%);
     transition: transform 0.3s ease;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
     z-index: 999;
+    overflow-y: auto;
+    justify-content: flex-start;
   }
   
   .nav-menu.nav-open {
-    transform: translateY(0);
+    transform: translateX(0);
   }
   
   .nav-link {
     width: 100%;
-    padding: 12px 16px;
+    padding: 14px 20px;
     justify-content: center;
     font-size: 18px;
+    min-height: 52px;
+    border-radius: 12px;
+  }
+  
+  .nav-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  .nav-icon {
+    font-size: 22px;
   }
   
   .user-profile {
-    padding: 4px 8px;
+    padding: 3px 8px 3px 4px;
+    gap: 6px;
+  }
+  
+  .user-avatar {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .avatar-placeholder {
+    font-size: 12px;
   }
   
   .user-info {
     display: none;
   }
   
-  .user-avatar {
-    width: 32px;
-    height: 32px;
+  /* Кнопка закрытия меню через оверлей */
+  .nav-menu::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%);
+    z-index: -1;
   }
 }
 
+/* Маленькие смартфоны (до 480px) */
 @media (max-width: 480px) {
-  .logo-icon {
-    font-size: 24px;
+  .header-container {
+    padding: 6px 10px;
+    min-height: 48px;
   }
   
   .logo-text {
-    font-size: 16px;
+    font-size: 14px;
+  }
+  
+  .logo-icon {
+    font-size: 20px;
+  }
+  
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+  }
+  
+  .menu-icon {
+    width: 22px;
+  }
+  
+  .menu-icon span {
+    height: 2px;
   }
   
   .nav-link {
     font-size: 16px;
-    padding: 10px 14px;
+    padding: 12px 16px;
+    min-height: 48px;
   }
   
-  .menu-icon {
+  .nav-icon {
+    font-size: 20px;
+  }
+  
+  .user-modal-avatar {
+    width: 80px;
+    height: 80px;
+  }
+  
+  .modal-avatar-placeholder {
+    font-size: 28px;
+  }
+  
+  .user-modal-info p {
+    font-size: 13px;
+  }
+}
+
+/* Очень маленькие экраны (до 360px) */
+@media (max-width: 360px) {
+  .logo-text {
+    font-size: 12px;
+  }
+  
+  .logo-icon {
+    font-size: 18px;
+  }
+  
+  .header-container {
+    gap: 4px;
+    padding: 4px 8px;
+  }
+  
+  .user-avatar {
     width: 24px;
+    height: 24px;
   }
   
-  .user-modal {
-    max-width: 95%;
+  .user-profile {
+    padding: 2px 4px;
   }
 }
 </style>

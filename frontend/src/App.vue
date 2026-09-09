@@ -1,7 +1,7 @@
 <!-- frontend/src/App.vue -->
 <template>
   <div id="app">
-    <Header />
+    <Header v-if="!isWelcomePage" />
     <main class="main-content" :class="{ 'no-header': isWelcomePage }">
       <router-view />
     </main>
@@ -28,46 +28,40 @@ export default {
 </script>
 
 <style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  background: #f5f7fa;
-  color: #2c3e50;
-  -webkit-font-smoothing: antialiased;
-}
+/* Импортируем глобальные стили */
+@import './assets/styles/main.css';
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 
 .main-content {
   flex: 1;
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  width: 100%;
+  padding: 20px;
 }
 
 .main-content.no-header {
   max-width: 100%;
+  padding: 0;
   margin: 0;
 }
 
+/* Адаптивные отступы для контента */
 @media (max-width: 768px) {
   .main-content {
-    padding: 0 15px;
+    padding: 15px;
   }
 }
 
 @media (max-width: 480px) {
   .main-content {
-    padding: 0 10px;
+    padding: 10px;
   }
 }
 </style>
