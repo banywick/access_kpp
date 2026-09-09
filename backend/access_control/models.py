@@ -244,7 +244,7 @@ class Contractor(AbstractUser):
                 return code
     
     def verify_user(self):
-        """Верификация пользователя с созданием доступа"""
+        """Верификация пользователя с генерацией кодов и созданием доступа"""
         if self.is_verified:
             return False
         
@@ -254,37 +254,26 @@ class Contractor(AbstractUser):
         self.generate_access_code()
         self.generate_qr_code()
         
-        # Создаем или обновляем запись в списке доступа
-        today = timezone.now().date()
-        access, created = AccessList.objects.get_or_create(
+        # Создаем запись в списке доступа на 30 дней (только одну, без привязки к дате)
+        AccessList.objects.create(
             contractor=self,
-            date=today,
-            defaults={
-                'is_allowed': True,
-                'status': AccessList.AccessStatus.OFF_TERRITORY,
-                'valid_from': today,
-                'valid_until': today + timedelta(days=30)
-            }
+            is_allowed=True,
+            status=AccessList.AccessStatus.OFF_TERRITORY,
+            valid_from=timezone.now().date(),
+            valid_until=timezone.now().date() + timedelta(days=30)
         )
-        
-        # Если запись уже существовала, обновляем её
-        if not created:
-            access.is_allowed = True
-            access.status = AccessList.AccessStatus.OFF_TERRITORY
-            access.valid_from = today
-            access.valid_until = today + timedelta(days=30)
-            access.ban_reason = None
-            access.save()
         
         self.save()
         return True
-    
+        
     def has_usable_password(self):
         return self.password is not None and self.password != ''
 
 
+# backend/access_control/models.py
+
 class AccessList(models.Model):
-    """Список доступа на день"""
+    """Список доступа (не привязан к дате, действует непрерывно)"""
     
     class AccessStatus(models.TextChoices):
         ON_TERRITORY = 'on_territory', 'На территории'
@@ -298,10 +287,9 @@ class AccessList(models.Model):
         related_name='access_entries',
         verbose_name="Подрядчик"
     )
-    date = models.DateField(
-        default=timezone.now,
-        verbose_name="Дата"
-    )
+    # Убираем поле date - доступ теперь непрерывный
+    # date = models.DateField(default=timezone.now, verbose_name="Дата")
+    
     is_allowed = models.BooleanField(
         default=True,
         verbose_name="Доступ разрешен"
@@ -359,18 +347,19 @@ class AccessList(models.Model):
     class Meta:
         verbose_name = "Список доступа"
         verbose_name_plural = "Списки доступа"
-        unique_together = ['date', 'contractor']
-        ordering = ['-date', 'contractor']
+        # Убираем unique_together для date
+        ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['status', 'date']),
+            models.Index(fields=['status']),
             models.Index(fields=['contractor', 'status']),
             models.Index(fields=['is_on_territory']),
+            models.Index(fields=['valid_until']),
         ]
     
     def __str__(self):
         status_display = self.get_status_display()
         territory = "📍 На территории" if self.is_on_territory else "🚫 Не на территории"
-        return f"{self.date} - {self.contractor} ({status_display}) - {territory}"
+        return f"{self.contractor} ({status_display}) - {territory}"
     
     def is_valid(self):
         """Проверяет, действителен ли доступ на текущую дату"""
@@ -386,9 +375,6 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
-        
-        # Синхронизируем статус с Contractor
-        self.sync_with_contractor()
     
     def set_off_territory(self, updated_by=None):
         """Установить статус 'Не на территории'"""
@@ -399,9 +385,6 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
-        
-        # Синхронизируем статус с Contractor
-        self.sync_with_contractor()
     
     def set_temporary(self, days=1, updated_by=None):
         """Установить временный доступ"""
@@ -412,9 +395,6 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
-        
-        # Синхронизируем статус с Contractor
-        self.sync_with_contractor()
     
     def set_banned(self, reason="", updated_by=None):
         """Заблокировать доступ"""
@@ -425,23 +405,6 @@ class AccessList(models.Model):
         if updated_by:
             self.updated_by = updated_by
         self.save()
-        
-        # Синхронизируем статус с Contractor
-        self.sync_with_contractor()
-    
-    def sync_with_contractor(self):
-        """Синхронизирует статус с моделью Contractor"""
-        contractor = self.contractor
-        
-        # Если доступ разрешен - подрядчик верифицирован
-        if self.is_allowed:
-            contractor.is_verified = True
-        else:
-            contractor.is_verified = False
-        
-        # Сохраняем только поле is_verified
-        contractor.save(update_fields=['is_verified'])
-
 
 class AccessLog(models.Model):
     """Лог сканирования QR кодов и ввода кодов"""

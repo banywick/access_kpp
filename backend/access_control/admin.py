@@ -468,14 +468,15 @@ class ContractorAdmin(UserAdmin):
 # ========== АДМИНКА СПИСКОВ ДОСТУПА ==========
 # backend/access_control/admin.py - только исправленная часть AccessListAdmin
 
+# backend/access_control/admin.py
+
 @admin.register(AccessList)
 class AccessListAdmin(admin.ModelAdmin):
-    """Админка для списка доступа - отображаются только верифицированные подрядчики"""
+    """Админка для списка доступа"""
     
     list_display = [
         'contractor',
         'contractor_organization',
-        'date',
         'is_allowed_badge',
         'status_colored',
         'valid_from',
@@ -487,7 +488,6 @@ class AccessListAdmin(admin.ModelAdmin):
         'status',
         'is_on_territory',
         'is_allowed',
-        'date',
         'valid_from',
         'valid_until',
     ]
@@ -500,41 +500,31 @@ class AccessListAdmin(admin.ModelAdmin):
     list_editable = ['valid_from', 'valid_until']
     list_per_page = 20
     
-    # Упрощаем fieldsets - убираем date и status
     fieldsets = (
         ('Информация о доступе', {
-            'fields': ('contractor', 'is_allowed', 'ban_reason'),
-            'description': 'Управление доступом подрядчика'
-        }),
-        ('Срок действия', {
-            'fields': ('valid_from', 'valid_until'),
-            'description': 'Установите период действия разрешения на доступ'
+            'fields': ('contractor', 'is_allowed', 'status', 'ban_reason')
         }),
         ('Статус на территории', {
-            'fields': ('is_on_territory',),
-            'classes': ('collapse',),
-            'description': 'Текущий статус нахождения на территории (только для просмотра)'
+            'fields': ('is_on_territory', 'last_entry_time', 'last_exit_time')
+        }),
+        ('Срок действия', {
+            'fields': ('valid_from', 'valid_until')
         }),
         ('Информация об обновлении', {
-            'fields': ('updated_by', 'updated_at'),
+            'fields': ('updated_by', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
     
-    # Добавляем readonly_fields для полей, которые нельзя редактировать
     readonly_fields = [
         'created_at', 
         'updated_at', 
         'last_entry_time', 
         'last_exit_time',
-        'contractor',  # Запрещаем менять подрядчика
-        'is_on_territory',  # Только для просмотра
-        'status',  # Скрываем статус, он управляется автоматически
-        'date',  # Скрываем дату
+        'contractor',
+        'is_on_territory',
+        'status',
     ]
-    
-    # Исключаем поля, которые не должны отображаться в форме
-    exclude = ['date', 'status', 'last_entry_time', 'last_exit_time']
     
     actions = [
         'set_on_territory',
@@ -547,61 +537,18 @@ class AccessListAdmin(admin.ModelAdmin):
         'set_temporary_7_days',
     ]
     
-    # ... остальные методы ...
-    
-    def get_queryset(self, request):
-        """Возвращает записи только для верифицированных подрядчиков"""
-        today = timezone.now().date()
-        
-        verified_contractors = Contractor.objects.filter(
-            is_verified=True,
-            role='contractor',
-            is_active=True
-        )
-        
-        existing = AccessList.objects.filter(date=today)
-        existing_contractor_ids = set(existing.values_list('contractor_id', flat=True))
-        
-        contractors_without_access = verified_contractors.exclude(id__in=existing_contractor_ids)
-        
-        created_count = 0
-        for contractor in contractors_without_access:
-            AccessList.objects.create(
-                contractor=contractor,
-                date=today,
-                is_allowed=True,
-                status=AccessList.AccessStatus.OFF_TERRITORY,
-                valid_from=today,
-                valid_until=today + timedelta(days=30)
-            )
-            created_count += 1
-        
-        if created_count > 0:
-            logger.info(f'Создано {created_count} записей доступа для верифицированных подрядчиков')
-        
-        return super().get_queryset(request).filter(
-            date=today,
-            contractor__in=verified_contractors
-        ).select_related('contractor', 'updated_by')
-    
     def contractor_organization(self, obj):
         return obj.contractor.organization if obj.contractor.organization else '-'
     contractor_organization.short_description = "Организация"
     contractor_organization.admin_order_field = 'contractor__organization'
     
     def is_allowed_badge(self, obj):
-        """Отображение разрешения доступа (компактно)"""
         if obj.is_allowed:
-            return format_html(
-                '<span style="color: #28a745; font-weight: 600;">✅ Разрешен</span>'
-            )
-        return format_html(
-            '<span style="color: #dc3545; font-weight: 600;">❌ Запрещен</span>'
-        )
+            return format_html('<span style="color: #28a745; font-weight: 600;">✅ Разрешен</span>')
+        return format_html('<span style="color: #dc3545; font-weight: 600;">❌ Запрещен</span>')
     is_allowed_badge.short_description = "Доступ"
     
     def status_colored(self, obj):
-        """Цветной статус доступа (компактно)"""
         colors = {
             'on_territory': '#0d47a1',
             'off_territory': '#6c757d',
@@ -633,18 +580,12 @@ class AccessListAdmin(admin.ModelAdmin):
     status_colored.short_description = "Статус"
     
     def is_valid_badge(self, obj):
-        """Проверка действительности доступа (компактно)"""
         if obj.is_valid():
-            return format_html(
-                '<span style="color: #28a745; font-weight: 600;">✅ Активен</span>'
-            )
-        return format_html(
-            '<span style="color: #dc3545; font-weight: 600;">❌ Истек</span>'
-        )
+            return format_html('<span style="color: #28a745; font-weight: 600;">✅ Активен</span>')
+        return format_html('<span style="color: #dc3545; font-weight: 600;">❌ Истек</span>')
     is_valid_badge.short_description = "Актуальность"
     
     def days_remaining(self, obj):
-        """Отображает количество оставшихся дней (компактно)"""
         if not obj.is_allowed:
             return '—'
         today = timezone.now().date()
@@ -659,7 +600,9 @@ class AccessListAdmin(admin.ModelAdmin):
             return f'🟢 {days}д'
     days_remaining.short_description = "Дней"
     
-    # ========== ДЕЙСТВИЯ ==========
+    def get_queryset(self, request):
+        """Возвращает только активные записи доступа"""
+        return super().get_queryset(request).select_related('contractor', 'updated_by')
     
     def set_on_territory(self, request, queryset):
         updated = 0

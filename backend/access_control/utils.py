@@ -153,20 +153,20 @@ def process_excel_file(file):
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
-
-def get_today_access(contractor):
+def get_contractor_access(contractor):
     """
-    Получить статус доступа на сегодня
+    Получить актуальную запись доступа для подрядчика
     """
-    today = timezone.now().date()
     try:
-        access = AccessList.objects.get(
-            contractor=contractor,
-            date=today
-        )
+        access = AccessList.objects.get(contractor=contractor)
         return access
     except AccessList.DoesNotExist:
         return None
+
+
+def get_today_access(contractor):
+    """Получить статус доступа (устарело, используйте get_contractor_access)"""
+    return get_contractor_access(contractor)
 
 
 def normalize_belarus_phone(phone_number):

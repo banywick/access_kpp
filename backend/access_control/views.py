@@ -3,7 +3,7 @@ import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions, viewsets
-from rest_framework.decorators import action  # <-- ДОБАВЛЯЕМ ЭТОТ ИМПОРТ
+from rest_framework.decorators import action
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.contrib.auth import authenticate
@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from .models import Contractor, AccessList, AccessLog
 from .serializers import ContractorSerializer, AccessListSerializer, AccessLogSerializer
-from .utils import verify_face, process_excel_file, get_today_access, generate_qr_code_image  # Добавляем импорт
+from .utils import verify_face, process_excel_file, generate_qr_code_image, get_contractor_access
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 # ========== ПРОВЕРКА ПОЛЬЗОВАТЕЛЯ ==========
 @method_decorator(csrf_exempt, name='dispatch')
 class CheckUserView(APIView):
-    # Явно указываем, что аутентификация не требуется
-    authentication_classes = []  # Отключаем аутентификацию
-    permission_classes = [permissions.AllowAny]  # Разрешаем всем
+    permission_classes = [permissions.AllowAny]
     
     def post(self, request):
         try:
@@ -78,7 +76,6 @@ class CheckUserView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class ContractorLoginView(APIView):
     """Вход для подрядчиков - без пароля"""
-    authentication_classes = []  # Отключаем аутентификацию
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):
@@ -218,8 +215,6 @@ class LoginView(APIView):
 
 
 # ========== ПОЛУЧЕНИЕ QR КОДА ==========
-# backend/access_control/views.py - исправленный GetQRView
-
 @method_decorator(csrf_exempt, name='dispatch')
 class GetQRView(APIView):
     """Получить QR код и код доступа с информацией о сроке действия"""
@@ -254,11 +249,7 @@ class GetQRView(APIView):
             qr_image = generate_qr_code_image(qr_data)
             
             # Получаем информацию о доступе
-            today = timezone.now().date()
-            access_entry = AccessList.objects.filter(
-                contractor=user,
-                date=today
-            ).first()
+            access_entry = AccessList.objects.filter(contractor=user).first()
             
             valid_until = None
             days_remaining = None
@@ -271,7 +262,7 @@ class GetQRView(APIView):
                 is_allowed = access_entry.is_allowed
                 ban_reason = access_entry.ban_reason
                 
-                # Проверяем срок действия
+                today = timezone.now().date()
                 if is_allowed and valid_until:
                     days_remaining = (valid_until - today).days
                     if days_remaining < 0:
@@ -283,9 +274,8 @@ class GetQRView(APIView):
                 elif not is_allowed:
                     access_status = 'запрещен'
                     if ban_reason:
-                        access_status = f'запрещен'
+                        access_status = f'запрещен ({ban_reason})'
             else:
-                # Нет записи о доступе
                 is_allowed = False
                 access_status = 'не найден'
             
@@ -321,6 +311,7 @@ class GetQRView(APIView):
                 'message': f'Ошибка получения QR кода: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 # ========== VIEWSETS ==========
 class ContractorViewSet(viewsets.ModelViewSet):
     queryset = Contractor.objects.all()
@@ -329,7 +320,6 @@ class ContractorViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
-        """Верификация подрядчика с созданием доступа"""
         contractor = self.get_object()
         
         if contractor.role != 'contractor':
@@ -356,7 +346,6 @@ class ContractorViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def regenerate_codes(self, request, pk=None):
-        """Перегенерировать коды доступа"""
         contractor = self.get_object()
         
         if not contractor.is_verified:
@@ -382,14 +371,11 @@ class AccessListViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = AccessList.objects.all()
-        date_param = self.request.query_params.get('date')
-        if date_param:
-            queryset = queryset.filter(date=date_param)
+        # Убираем фильтр по дате
         return queryset
     
     @action(detail=True, methods=['post'])
     def toggle_access(self, request, pk=None):
-        """Переключить доступ"""
         access = self.get_object()
         access.is_allowed = not access.is_allowed
         
@@ -418,8 +404,6 @@ class AccessLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 # ========== QR СКАНИРОВАНИЕ ==========
-# backend/access_control/views.py
-
 @method_decorator(csrf_exempt, name='dispatch')
 class QRScanView(APIView):
     """Сканирование QR кода и обработка доступа"""
@@ -432,9 +416,8 @@ class QRScanView(APIView):
             access_type = request.data.get('access_type', 'entry')
             guard_id = request.data.get('guard_id')
             guard_phone = request.data.get('guard_phone')
-            guard_name = request.data.get('guard_name')
             
-            print(f"QRScanView: access_code={access_code}, qr_code_raw={qr_code_raw}, type={access_type}")
+            print(f"QRScanView: access_code={access_code}, qr_code={qr_code_raw}, type={access_type}")
             
             contractor = None
             
@@ -445,7 +428,6 @@ class QRScanView(APIView):
                     qr_data = json.loads(qr_code_raw)
                     print(f"Decoded QR data: {qr_data}")
                     
-                    # Ищем по ID из QR
                     contractor_id = qr_data.get('id')
                     if contractor_id:
                         contractor = Contractor.objects.filter(id=contractor_id).first()
@@ -489,16 +471,13 @@ class QRScanView(APIView):
                     'message': 'Пользователь не верифицирован'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            today = timezone.now().date()
-            access_entry = AccessList.objects.filter(
-                contractor=contractor,
-                date=today
-            ).first()
+            # Получаем доступ (без привязки к дате)
+            access_entry = AccessList.objects.filter(contractor=contractor).first()
             
             if not access_entry:
                 return Response({
                     'success': False,
-                    'message': 'Нет доступа на сегодня'
+                    'message': 'Нет доступа'
                 }, status=status.HTTP_403_FORBIDDEN)
             
             if not access_entry.is_allowed:
@@ -587,8 +566,6 @@ class QRScanView(APIView):
 
 
 # ========== ПОЛУЧЕНИЕ ИНФОРМАЦИИ О ПОДРЯДЧИКЕ ==========
-# backend/access_control/views.py
-
 @method_decorator(csrf_exempt, name='dispatch')
 class GetContractorInfoView(APIView):
     """Получение информации о подрядчике по QR-коду или коду доступа"""
@@ -597,28 +574,24 @@ class GetContractorInfoView(APIView):
     def post(self, request):
         try:
             access_code = request.data.get('access_code')
-            qr_code_raw = request.data.get('qr_code')  # Это данные из QR (JSON строка)
+            qr_code_raw = request.data.get('qr_code')
             
-            print(f"GetContractorInfoView: access_code={access_code}, qr_code_raw={qr_code_raw}")
+            print(f"GetContractorInfoView: access_code={access_code}, qr_code={qr_code_raw}")
             
             contractor = None
             
-            # Пытаемся декодировать QR код
             if qr_code_raw:
                 try:
-                    # Пробуем распарсить JSON из QR кода
                     import json
                     qr_data = json.loads(qr_code_raw)
                     print(f"Decoded QR data: {qr_data}")
                     
-                    # Ищем по ID из QR
                     contractor_id = qr_data.get('id')
                     if contractor_id:
                         contractor = Contractor.objects.filter(id=contractor_id).first()
                         if contractor:
                             print(f"Found by ID from QR: {contractor.phone_number}")
                     
-                    # Если не нашли по ID, ищем по code (access_code)
                     if not contractor:
                         code = qr_data.get('code')
                         if code:
@@ -626,7 +599,6 @@ class GetContractorInfoView(APIView):
                             if contractor:
                                 print(f"Found by code from QR: {contractor.phone_number}")
                     
-                    # Если не нашли, ищем по телефону
                     if not contractor:
                         phone = qr_data.get('phone')
                         if phone:
@@ -636,12 +608,10 @@ class GetContractorInfoView(APIView):
                                 
                 except json.JSONDecodeError:
                     print(f"Failed to parse QR data as JSON, treating as hash")
-                    # Если не JSON, пробуем найти по qr_code полю (старый способ)
                     contractor = Contractor.objects.filter(qr_code=qr_code_raw).first()
                     if contractor:
                         print(f"Found by qr_code field: {contractor.phone_number}")
             
-            # Если не нашли по QR, ищем по коду доступа
             if not contractor and access_code:
                 contractor = Contractor.objects.filter(access_code=access_code).first()
                 if contractor:
@@ -659,19 +629,14 @@ class GetContractorInfoView(APIView):
                     'message': 'Пользователь не верифицирован'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            # Получаем статус на территории
-            today = timezone.now().date()
-            access_entry = AccessList.objects.filter(
-                contractor=contractor,
-                date=today
-            ).first()
+            # Получаем доступ (без привязки к дате)
+            access_entry = AccessList.objects.filter(contractor=contractor).first()
             
             is_on_territory = access_entry.is_on_territory if access_entry else False
             valid_until = access_entry.valid_until if access_entry else None
             is_allowed = access_entry.is_allowed if access_entry else False
             ban_reason = access_entry.ban_reason if access_entry else None
             
-            # Формируем URL фото
             photo_url = None
             if contractor.photo:
                 photo_url = contractor.photo.url
@@ -705,6 +670,7 @@ class GetContractorInfoView(APIView):
                 'message': f'Ошибка: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 # ========== ОСТАЛЬНЫЕ VIEW ==========
 
 class ContractorRegisterView(APIView):
@@ -718,7 +684,6 @@ class ContractorRegisterView(APIView):
 
 
 class ContractorPhotoView(APIView):
-    """Шаг 2: Загрузка фото и автоматическая верификация"""
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
@@ -732,14 +697,12 @@ class ContractorPhotoView(APIView):
                     'message': 'Фото не загружено'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Проверяем размер файла (максимум 5MB)
             if photo.size > 5 * 1024 * 1024:
                 return Response({
                     'success': False,
                     'message': 'Файл слишком большой. Максимальный размер 5MB'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Проверяем формат
             import imghdr
             file_format = imghdr.what(photo)
             valid_formats = ['jpeg', 'jpg', 'png', 'gif']
@@ -750,16 +713,13 @@ class ContractorPhotoView(APIView):
                     'message': f'Неверный формат файла. Допустимые: {", ".join(valid_formats)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Сохраняем фото
             user.photo = photo
             user.save()
             
-            # Автоматически верифицируем пользователя
             if not user.is_verified:
-                user.verify_user()  # Этот метод генерирует QR код, access code и создает доступ
+                user.verify_user()
                 print(f"✅ User {user.phone_number} automatically verified after photo upload")
             
-            # Формируем URL фото
             photo_url = user.photo.url if user.photo else None
             
             return Response({
